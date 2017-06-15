@@ -97,6 +97,9 @@ func (s *Server) ircState() ([]byte, error) {
 
 func (s *Server) responderState() ([]byte, error) {
 	lr := s.rpool.List()
+	if len(lr) < 1 {
+		return nil, nil
+	}
 	d := make([]*wsResponder, 0)
 
 	for _, v := range lr {
@@ -160,7 +163,9 @@ func (s *Server) broadcastResponders() {
 		log.Printf("websocket: ircjson error: %v", err)
 		return
 	}
-	s.spool.broadcast(b)
+	if b != nil {
+		s.spool.broadcast(b)
+	}
 }
 
 func (s *subpool) unsubscribe(c *client) {
@@ -259,7 +264,9 @@ func (s *Server) wsHandler(w http.ResponseWriter, r *http.Request) {
 				log.Printf("websocket: reader error %v", err)
 				break
 			}
-			ac.ch <- r
+			if r != nil {
+				ac.ch <- r
+			}
 
 		default:
 			log.Printf("invalid command %s from %q", string(msg), ws.RemoteAddr())

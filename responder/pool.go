@@ -60,7 +60,7 @@ func get(w, l int) int {
 	return w - 1
 }
 
-func (p *Pool) get(name string) *Responder {
+func (p *Pool) get(name string, add bool) *Responder {
 	p.poolMu.Lock()
 	if r, exists := p.pool[name]; exists {
 		p.poolMu.Unlock()
@@ -69,7 +69,9 @@ func (p *Pool) get(name string) *Responder {
 	p.poolMu.Unlock()
 
 	n := &Responder{Name: name}
-	p.Add(n)
+	if add {
+		p.Add(n)
+	}
 
 	return n
 }
@@ -85,7 +87,7 @@ func (p *Pool) Get(r []string) (*Responder, int, error) {
 
 	for x := 0; x < l; x++ {
 		i := get(w+x, l)
-		u := p.get(r[i])
+		u := p.get(r[i], true)
 
 		if !u.Failed() {
 			return u, i, nil
@@ -96,11 +98,11 @@ func (p *Pool) Get(r []string) (*Responder, int, error) {
 }
 
 func (p *Pool) Update(name string) {
-	r := p.get(name)
+	r := p.get(name, false)
 	r.Update()
 }
 
 func (p *Pool) ResetFailed(name string) bool {
-	r := p.get(name)
+	r := p.get(name, true)
 	return r.resetFailed()
 }

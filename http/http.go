@@ -95,7 +95,10 @@ func (s *Server) alert(a *alert.Alert) {
 		return
 	}
 
-	n.Ping(s.broadcastResponders)
+	if n != nil {
+		n.Ping(s.broadcastResponders)
+	}
+
 	s.spool.broadcastAlert(ca)
 
 	if err = s.irc.NSendMsg(m); err != nil {

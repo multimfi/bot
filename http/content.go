@@ -282,7 +282,6 @@ td {
 </table>
 </div>
 </body>
-</html>
-`)
+</html>`)
 
 // vim: set ft=javascript:
