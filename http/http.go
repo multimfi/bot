@@ -39,16 +39,11 @@ func NewServer(irc *irc.Client, srv *http.ServeMux) *Server {
 
 	irc.StatusFunc(r.statusFunc)
 	irc.Handle("!clear", r.clear)
-	irc.Handle("!current", func(string) string {
-		r := r.statusFunc()
-		if r != "" {
-			return r
-		}
-		return "no alerts"
-	})
-
 	irc.Handle("!reset", func(m string) string {
-		r.rpool.ResetFailed(m)
+		if !r.rpool.ResetFailed(m) {
+			return "not failed"
+		}
+		r.broadcastResponders()
 		return "tada!"
 	})
 
@@ -78,15 +73,12 @@ func (s *Server) alert(a *alert.Alert) {
 
 	n, i, err := s.rpool.Get(r)
 	if err != nil {
-		ok = true
 		log.Printf("alert: error: %v", err)
 	}
 
 	if n != nil {
 		ca.SetCurrent(int32(i))
 		ok = ok || oi != int32(i)
-
-		n.Ping()
 
 		if n.Active() {
 			m = ca.String()
@@ -103,7 +95,8 @@ func (s *Server) alert(a *alert.Alert) {
 		return
 	}
 
-	s.spool.broadcast(a)
+	n.Ping(s.broadcastResponders)
+	s.spool.broadcastAlert(ca)
 
 	if err = s.irc.NSendMsg(m); err != nil {
 		log.Printf("alert: error: %v", err)
@@ -115,7 +108,7 @@ func (s *Server) resolve(a *alert.Alert) {
 		return
 	}
 
-	s.spool.broadcast(a)
+	s.spool.broadcastAlert(a)
 
 	if err := s.irc.NSendMsg(a.String()); err != nil {
 		log.Printf("resolve: error: %v", err)
@@ -179,6 +172,7 @@ func (s *Server) statusPageHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) statusFunc() string {
+	s.broadcastIRC()
 	l := len(s.pool.List())
 	if l > 0 {
 		return fmt.Sprintf("alert: %d firing alerts", l)
@@ -203,6 +197,8 @@ func (s *Server) Dial() error {
 		default:
 			d = time.Second
 		}
+
+		s.broadcastIRC()
 
 		log.Printf("server: error %[1]q, %[1]T, reconnecting in %[2]s", err, d)
 		time.Sleep(d)

@@ -212,6 +212,15 @@ func (c *Client) setready() {
 	}
 }
 
+func (c *Client) IsReady() bool {
+	select {
+	case <-c.ready:
+		return true
+	default:
+		return false
+	}
+}
+
 func (c *Client) msgHandler(m *irc.Message) error {
 	var (
 		dst string
@@ -288,7 +297,5 @@ func (c *Client) listen() error {
 				log.Println(err)
 			}
 		}
-
-		log.Printf("irc: server: %v: %v", m.Command, m)
 	}
 }

@@ -41,50 +41,63 @@ func (r *Responder) Failed() bool {
 	return r.failed
 }
 
-func (r *Responder) Ping() {
-	r.once.Do(r.wait)
+// Ping waits for a response from responder.
+// Argument f is called on state change.
+func (r *Responder) Ping(f func()) {
+	r.once.Do(func() {
+		r.wait(f)
+	})
 }
 
 func (r *Responder) setactive() {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	r.active = true
+	r.mu.Unlock()
 }
 
 func (r *Responder) setfailed() {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	r.failed = true
+	r.mu.Unlock()
 }
 
 func (r *Responder) reset() {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	r.active = false
 	r.failed = false
 	r.once = sync.Once{}
+	r.mu.Unlock()
 }
 
-func (r *Responder) resetFailed() {
+func (r *Responder) resetFailed() bool {
 	if !r.Failed() {
-		return
+		return false
 	}
 	r.reset()
+	return true
 }
 
 // wait waits for responder activity
-func (r *Responder) wait() {
+func (r *Responder) wait(f func()) {
 	c := r.get()
 	go func() {
 		for i := 0; i < 300; i++ {
-			if r.get() > c {
-				r.setactive()
-				time.Sleep(liveness)
-				r.reset()
-				return
-			}
 			time.Sleep(tickRate)
+			if r.get() <= c {
+				continue
+			}
+
+			r.setactive()
+			f()
+
+			time.Sleep(liveness)
+			r.reset()
+
+			f()
+			return
 		}
+
 		r.setfailed()
+		f()
 	}()
 }

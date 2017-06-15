@@ -7,7 +7,11 @@ var indexHTML = []byte(`<!DOCTYPE html>
 <script type="text/javascript">
 window.onload = function () {
 	var conn;
+
+	var interval = 0;
 	var alerts = {};
+	var responders = {};
+
 	var state = document.getElementById("state").tBodies[0];
 	var states = ["firing", "resolved"];
 	var labels = {
@@ -26,10 +30,16 @@ window.onload = function () {
 		},
 
 		"startsAt": function(obj, item) {
-			if (obj.status != "firing")
+			if (obj.status != "firing") {
+				delete(alerts[obj.hash].updater)
 				return;
-			var d = new Date(obj["startsAt"]);
-			item.innerHTML = since(Date.now(), d);
+			}
+			alerts[obj.hash].updater = function(t) {
+				var d = new Date(obj["startsAt"]);
+				item.innerHTML = obj["startsAt"]
+				item.innerHTML += "<br><b>" + since(t, d) + "</b>";
+			}
+			alerts[obj.hash].updater(Date.now())
 		},
 
 		"endsAt": function(obj, item) {
@@ -39,25 +49,41 @@ window.onload = function () {
 				item.innerHTML = "tbd";
 				return
 			}
-			item.innerHTML = since(d1, d2);
+			item.innerHTML = obj["endsAt"]
+			item.innerHTML += "<br><b>"+since(d1, d2)+"</b>";
 		},
 
 		"responders": function(obj, item) {
+			if (obj.status != "firing") {
+				return;
+			}
+
 			var r = obj["responders"];
 			if (!r) {
 				item.innerHTML = "none";
 				return;
 			}
-			item.innerHTML = r[obj.current];
+			item.innerHTML = "<b>" + r[obj.current] + "</b>";
+			item.innerHTML += "<br>" + obj.responders;
 		}
 	}
 
+	function updater() {
+		var now = Date.now();
+		for (i in alerts) {
+			if (typeof alerts[i].updater != "undefined") {
+				alerts[i].updater(now);
+			}
+		}
+	}
 
 	function since(x, y) {
 		var t = (x - y)/1e3;
-		var h = Math.floor(t/3600);
-		var m = Math.floor((t/60)%60);
 		var s = Math.floor(t%60);
+		t /= 60
+		var m = Math.floor(t%60);
+		t /= 60
+		var h = Math.floor(t)
 		return h+"h"+m+"m"+s+"s";
 	}
 
@@ -112,12 +138,42 @@ window.onload = function () {
 			}
 			switch(name) {
 			case "endsAt":
-				labels[name](obj, item);
-				break;
 			case "startsAt":
+			case "responders":
 				labels[name](obj, item);
-				break;
 			}
+		}
+	}
+
+	function updateIRC(obj) {
+		var e = document.getElementById("irc")
+		if (obj.status != true) {
+			e.style.color = "red";
+			e.innerHTML = "FAIL!";
+			return
+		}
+		e.style.color = "green";
+		e.innerHTML = "OK!";
+	}
+
+	colormap = {
+		"active": "green",
+		"failed": "red",
+		"unknown": "black",
+	}
+
+	function updateResponders(obj) {
+		var e = document.getElementById("responders")
+		for (r in obj) {
+			var res = obj[r];
+			var item = getChild(res.name, e);
+			if (!item) {
+				item = document.createElement("span");
+				e.appendChild(item)
+				item.name = res.name;
+				item.innerHTML = res.name;
+			}
+			item.style.color = colormap[res.state];
 		}
 	}
 
@@ -130,23 +186,49 @@ window.onload = function () {
 
 	conn = new WebSocket("ws://" + document.location.host + "/ws");
 	conn.onopen = function() {
-		conn.send("status");
+		conn.send("alerts");
+		conn.send("irc");
+		conn.send("responders");
 	};
 	conn.onclose = function (evt) {
 		var item = document.createElement("div");
 		item.innerHTML = "<b>Connection closed.</b>";
 		document.body.append(item);
 	};
-
 	conn.onmessage = function (evt) {
 		var obj = JSON.parse(evt.data);
-		updateState(obj);
+		switch(obj.type) {
+		case "alert":
+			updateState(obj.msg);
+			break;
+		case "irc":
+			updateIRC(obj.msg);
+			break;
+		case "responders":
+			updateResponders(obj.msg);
+			break;
+		}
+
+		if (document.getElementsByClassName("firing").length < 1) {
+			clearInterval(interval);
+			interval = 0;
+			return;
+		}
+
+		if (interval > 0) {
+			return;
+		}
+
+		interval = setInterval(updater, 1000);
 	};
 };
 </script>
 <style type="text/css">
-body, td p {
+body {
 	font-family: sans-serif;
+}
+
+td p {
 	margin: 0;
 	padding: 0;
 }
@@ -172,24 +254,29 @@ table tr td, table tr th, h1 {
 	background: rgb(232, 255, 240);
 }
 
-.alert {
-	padding: 0.1%;
-	border-bottom: 1px solid #ddd;
+td {
+	padding: 1em;
+	border-top: 5px solid #fff;
 }
 
-.alert p, .item{
-	margin: auto;
+#responders span {
+	font-weight: bold;
+	padding: 1em;
 }
 </style>
 </head>
 <body>
+<p>IRC <b><span id="irc">TBD</span></b></p>
+<h4>Responders</h4>
+<div id="responders"></div>
+<h3>Alerts</h3>
 <div>
 <table id="state">
   <tr>
     <th>Labels</th> 
     <th>Annotations</th>
-    <th>Since</th>
-    <th>Lasted</th>
+    <th>Start</th>
+    <th>End</th>
     <th>Responder</th>
   </tr>
 </table>

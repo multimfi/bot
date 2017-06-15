@@ -13,8 +13,8 @@ import (
 )
 
 const (
-	writeWait  = 10 * time.Second
-	pongWait   = 60 * time.Second
+	writeWait  = time.Second * 10
+	pongWait   = time.Minute
 	pingPeriod = (pongWait * 9) / 10
 )
 
@@ -22,6 +22,11 @@ var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
 }
+
+var (
+	jsTrue  = []byte(`{"status": true}`)
+	jsFalse = []byte(`{"status": false}`)
+)
 
 type subpool struct {
 	mu sync.RWMutex
@@ -40,30 +45,86 @@ func newPool() *subpool {
 	}
 }
 
-type wsData struct {
+type wsAlert struct {
 	*alert.Alert
 	Hash       uint32   `json:"hash"`
 	Responders []string `json:"responders"`
 	Current    int32    `json:"current"`
 }
 
-func wsAlert(a *alert.Alert) ([]byte, error) {
-	d := wsData{
+type wsResponder struct {
+	Name  string `json:"name"`
+	State string `json:"state"`
+}
+
+type wsTyped struct {
+	Type string          `json:"type"`
+	Msg  json.RawMessage `json:"msg"`
+}
+
+func wsAlertMsg(a *alert.Alert) ([]byte, error) {
+	d := &wsAlert{
 		Alert:      a,
 		Hash:       a.Hash(),
 		Responders: a.Responders(),
 		Current:    a.Current(),
 	}
-	return json.Marshal(&d)
-}
 
-func (s *subpool) broadcast(a *alert.Alert) {
-	b, err := wsAlert(a)
+	j, err := json.Marshal(d)
 	if err != nil {
-		log.Printf("websocket: json error: %v", err)
-		return
+		return nil, err
 	}
 
+	r := &wsTyped{
+		Type: "alert",
+		Msg:  j,
+	}
+
+	return json.Marshal(r)
+}
+
+func (s *Server) ircState() ([]byte, error) {
+	r := &wsTyped{
+		Type: "irc",
+	}
+	if s.irc.IsReady() {
+		r.Msg = jsTrue
+	} else {
+		r.Msg = jsFalse
+	}
+	return json.Marshal(r)
+}
+
+func (s *Server) responderState() ([]byte, error) {
+	lr := s.rpool.List()
+	d := make([]*wsResponder, 0)
+
+	for _, v := range lr {
+		i := &wsResponder{Name: v.Name}
+		if v.Active() {
+			i.State = "active"
+		} else if v.Failed() {
+			i.State = "failed"
+		} else {
+			i.State = "unknown"
+		}
+		d = append(d, i)
+	}
+
+	j, err := json.Marshal(d)
+	if err != nil {
+		return nil, err
+	}
+
+	r := &wsTyped{
+		Type: "responders",
+		Msg:  j,
+	}
+
+	return json.Marshal(r)
+}
+
+func (s *subpool) broadcast(b []byte) {
 	s.mu.RLock()
 	for k, v := range s.m {
 		select {
@@ -73,6 +134,33 @@ func (s *subpool) broadcast(a *alert.Alert) {
 		}
 	}
 	s.mu.RUnlock()
+}
+
+func (s *subpool) broadcastAlert(a *alert.Alert) {
+	b, err := wsAlertMsg(a)
+	if err != nil {
+		log.Printf("websocket: alertjson error: %v", err)
+		return
+	}
+	s.broadcast(b)
+}
+
+func (s *Server) broadcastIRC() {
+	b, err := s.ircState()
+	if err != nil {
+		log.Printf("websocket: ircjson error: %v", err)
+		return
+	}
+	s.spool.broadcast(b)
+}
+
+func (s *Server) broadcastResponders() {
+	b, err := s.responderState()
+	if err != nil {
+		log.Printf("websocket: ircjson error: %v", err)
+		return
+	}
+	s.spool.broadcast(b)
 }
 
 func (s *subpool) unsubscribe(c *client) {
@@ -147,19 +235,32 @@ func (s *Server) wsHandler(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			break
 		}
+
 		switch string(msg) {
-		case "status":
+		case "alerts":
 			for _, v := range s.pool.List() {
-				r, err := wsAlert(v)
+				r, err := wsAlertMsg(v)
 				if err != nil {
 					log.Printf("websocket: reader error %v", err)
+					break
 				}
-				select {
-				case ac.ch <- r:
-				default:
-					log.Printf("websocket: client send blocked for %d, %q", ac.id, ws.RemoteAddr())
-				}
+				ac.ch <- r
 			}
+		case "irc":
+			r, err := s.ircState()
+			if err != nil {
+				log.Printf("websocket: reader error %v", err)
+				break
+			}
+			ac.ch <- r
+		case "responders":
+			r, err := s.responderState()
+			if err != nil {
+				log.Printf("websocket: reader error %v", err)
+				break
+			}
+			ac.ch <- r
+
 		default:
 			log.Printf("invalid command %s from %q", string(msg), ws.RemoteAddr())
 		}

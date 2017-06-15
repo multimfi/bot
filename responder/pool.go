@@ -31,6 +31,19 @@ func (p *Pool) Add(r *Responder) {
 	p.poolMu.Unlock()
 }
 
+func (p *Pool) List() []*Responder {
+	p.poolMu.RLock()
+
+	ret := make([]*Responder, 0)
+
+	for _, v := range p.pool {
+		ret = append(ret, v)
+	}
+
+	p.poolMu.RUnlock()
+	return ret
+}
+
 func get(w, l int) int {
 	if w < 1 {
 		return 1
@@ -87,7 +100,7 @@ func (p *Pool) Update(name string) {
 	r.Update()
 }
 
-func (p *Pool) ResetFailed(name string) {
+func (p *Pool) ResetFailed(name string) bool {
 	r := p.get(name)
-	r.resetFailed()
+	return r.resetFailed()
 }
