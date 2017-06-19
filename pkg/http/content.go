@@ -25,8 +25,6 @@ window.onload = function () {
 	var labels = {
 		"labels": function(obj, item) {
 			for (x in obj["labels"]) {
-				if (x == "responders")
-					continue
 				item.appendChild(kv(x, obj["labels"][x]));
 			}
 		},
@@ -66,14 +64,13 @@ window.onload = function () {
 				return;
 			}
 
-			var r = obj["labels"]["responders"];
+			var r = obj["responders"];
 			if (!r) {
 				item.innerHTML = "none";
 				return;
 			}
-			var s = r.split(" ");
-			item.innerHTML = "<b>" + s[obj.c] + "</b>";
-			item.innerHTML += "<br>" + s;
+			item.innerHTML = "<b>" + r[obj.c] + "</b>";
+			item.innerHTML += "<br>" + r;
 		}
 	}
 

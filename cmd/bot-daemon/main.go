@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"os"
 	"os/signal"
@@ -20,6 +22,7 @@ import (
 var buildversion = "devel"
 
 var (
+	flagConfig      = flag.String("cfg", "bot.json", "bot configuration file")
 	flagIRCServer   = flag.String("irc.server", "127.0.0.1:6667", "irc server address")
 	flagIRCChannel  = flag.String("irc.channel", "#test", "irc channel to join")
 	flagIRCUsername = flag.String("irc.user", "Bot", "irc username")
@@ -43,6 +46,26 @@ func fatal(fs ...errFunc) {
 
 func version() string {
 	return fmt.Sprintf("build: %s, runtime: %s", buildversion, runtime.Version())
+}
+
+func config(file string) http.ReceiverGroup {
+	var r http.ReceiverGroup
+
+	f, err := ioutil.ReadFile(file)
+	if os.IsNotExist(err) {
+		log.Printf("config error: %v", err)
+		return nil
+	}
+
+	if err != nil {
+		log.Fatalf("config error: %v", err)
+	}
+
+	if err := json.Unmarshal(f, &r); err != nil {
+		log.Fatalf("config error: %v", err)
+	}
+
+	return r
 }
 
 func main() {
@@ -75,7 +98,7 @@ func main() {
 		return "pong"
 	})
 
-	srv := http.NewServer(ic, mux)
+	srv := http.NewServer(ic, mux, config(*flagConfig))
 
 	fatal(
 		srv.AlertManager,

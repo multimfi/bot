@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"hash/crc32"
 	"sort"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -46,21 +45,6 @@ func (a *Alert) Hash() uint32 {
 	}
 
 	return crc32.ChecksumIEEE(b)
-}
-
-func (a *Alert) Responders() []string {
-	if a.responders != nil {
-		return a.responders
-	}
-
-	l, ok := a.Labels["responders"]
-	if !ok {
-		return a.responders
-	}
-
-	a.responders = strings.Split(l, " ")
-
-	return a.responders
 }
 
 func truncate(t time.Duration) time.Duration {

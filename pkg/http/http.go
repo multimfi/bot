@@ -17,21 +17,25 @@ import (
 
 var ErrChanClosed = errors.New("alertmanager: closed channel")
 
+type ReceiverGroup map[string][]string
+
 type Server struct {
 	irc     *irc.Client
 	pool    *alert.Pool
 	rpool   *responder.Pool
 	spool   *subpool
 	alertCh chan *alert.Alert
+	rg      ReceiverGroup
 }
 
-func NewServer(irc *irc.Client, srv *http.ServeMux) *Server {
+func NewServer(irc *irc.Client, srv *http.ServeMux, rg ReceiverGroup) *Server {
 	r := &Server{
 		irc:     irc,
 		pool:    alert.NewPool(),
 		rpool:   responder.NewPool(),
 		spool:   newPool(),
 		alertCh: make(chan *alert.Alert, 2),
+		rg:      rg,
 	}
 
 	srv.HandleFunc("/alertmanager", r.alertManagerHandler)
@@ -72,7 +76,7 @@ func (s *Server) alert(a *alert.Alert) {
 	ok, ca = s.pool.Add(a)
 	oi := ca.Current()
 
-	r := ca.Responders()
+	r := ca.Responders
 
 	n, i, err := s.rpool.Get(r)
 	if err != nil {
@@ -91,7 +95,7 @@ func (s *Server) alert(a *alert.Alert) {
 	} else if len(r) < 1 {
 		m = ca.String()
 	} else {
-		m = fmt.Sprintf("%s - %s", ca, ca.Responders())
+		m = fmt.Sprintf("%s - %s", ca, ca.Responders)
 	}
 
 	if !ok {
@@ -150,6 +154,18 @@ func unmarshal(data io.Reader) (*alert.Data, error) {
 	return d, nil
 }
 
+func (s *Server) rGet(n string) []string {
+	if s.rg == nil {
+		return nil
+	}
+
+	if r, exists := s.rg[n]; exists {
+		return r
+	}
+
+	return nil
+}
+
 func (s *Server) alertManagerHandler(w http.ResponseWriter, r *http.Request) {
 	d, err := unmarshal(r.Body)
 	if err != nil {
@@ -160,6 +176,7 @@ func (s *Server) alertManagerHandler(w http.ResponseWriter, r *http.Request) {
 	r.Body.Close()
 
 	for _, v := range d.Alerts {
+		v.Responders = s.rGet(d.Receiver)
 		s.alertCh <- &v
 	}
 }

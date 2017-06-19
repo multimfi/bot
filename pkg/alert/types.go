@@ -9,8 +9,8 @@ const (
 
 // Alert represents an alert received from alertmanager.
 type Alert struct {
-	responders   []string
 	current      int32
+	Responders   []string          `json:"responders"`
 	Status       string            `json:"status"`
 	GeneratorURL string            `json:"generatorURL"`
 	Labels       map[string]string `json:"labels"`
