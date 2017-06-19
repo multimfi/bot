@@ -1,0 +1,25 @@
+global:
+route:
+  receiver: "group1"
+  group_by: ['alertname']
+  group_wait: 5s
+  group_interval: 5s
+  repeat_interval: 5s
+  routes:
+  - match:
+      severity: critical
+    receiver: "group2"
+
+receivers:
+- name: "group1"
+  webhook_configs:
+  - url: 'http://127.0.0.1:9500/alertmanager'
+    send_resolved: true
+- name: "group2"
+  webhook_configs:
+  - url: 'http://127.0.0.1:9500/alertmanager'
+    send_resolved: true
+- name: "group3"
+  webhook_configs:
+  - url: 'http://127.0.0.1:9500/alertmanager'
+    send_resolved: true
