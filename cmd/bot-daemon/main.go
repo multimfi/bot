@@ -13,8 +13,8 @@ import (
 
 	stdhttp "net/http"
 
-	"bitbucket.org/multimfi/bot/http"
-	"bitbucket.org/multimfi/bot/irc"
+	"bitbucket.org/multimfi/bot/pkg/http"
+	"bitbucket.org/multimfi/bot/pkg/irc"
 )
 
 var buildversion = "devel"
@@ -35,7 +35,7 @@ func fatal(fs ...errFunc) {
 		go func(f errFunc) {
 			err := f()
 			if err != nil {
-				panic(err)
+				log.Fatal(err)
 			}
 		}(f)
 	}
@@ -46,11 +46,11 @@ func version() string {
 }
 
 func main() {
-	log.SetFlags(log.Ltime | log.Lshortfile)
+	log.SetFlags(log.Lshortfile)
 	flag.Parse()
 
 	if *flagVersion {
-		fmt.Println(version())
+		fmt.Fprintln(os.Stderr, version())
 		os.Exit(0)
 	}
 
@@ -61,10 +61,10 @@ func main() {
 		Handler: mux,
 	}
 	ic := irc.NewClient(
-		*flagIRCNickname, // nick
-		*flagIRCUsername, // user
-		*flagIRCChannel,  // channel
-		*flagIRCServer,   // server
+		*flagIRCNickname,
+		*flagIRCUsername,
+		*flagIRCChannel,
+		*flagIRCServer,
 	)
 
 	ic.Handle("!version", func(string) string {

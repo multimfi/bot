@@ -8,6 +8,8 @@ import (
 
 var ErrNoResponse = errors.New("all responders failed")
 
+var now = time.Now
+
 type Pool struct {
 	poolMu sync.RWMutex
 	pool   map[string]*Responder
@@ -78,7 +80,7 @@ func (p *Pool) get(name string, add bool) *Responder {
 
 // Get returns ErrNoResponse when all responders are in failed state.
 func (p *Pool) Get(r []string) (*Responder, int, error) {
-	_, w := time.Now().ISOWeek()
+	_, w := now().ISOWeek()
 	l := len(r)
 
 	if l < 1 {

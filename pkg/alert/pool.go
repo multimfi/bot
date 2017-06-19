@@ -16,12 +16,18 @@ func NewPool() *Pool {
 	}
 }
 
-func (p *Pool) Reset() {
+func (p *Pool) Reset() bool {
 	p.alertsMu.Lock()
+
+	b := len(p.alerts)
 	for k := range p.alerts {
 		delete(p.alerts, k)
 	}
+
+	a := len(p.alerts)
 	p.alertsMu.Unlock()
+
+	return b != a
 }
 
 func (p *Pool) List() []*Alert {

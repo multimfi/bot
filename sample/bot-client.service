@@ -1,0 +1,11 @@
+[Unit]
+Description=bot websocket notifier
+After=graphical.target
+
+[Service]
+ExecStart=/home/user/.local/bin/bot-client
+Restart=always
+RestartSec=15s
+
+[Install]
+WantedBy=graphical.target

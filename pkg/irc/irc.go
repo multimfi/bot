@@ -4,31 +4,22 @@ import (
 	"errors"
 	"log"
 	"sync"
-	"time"
 
 	"github.com/sorcix/irc"
 )
 
-// Errors XXX
 var (
 	ErrNotReady = errors.New("irc: client not ready")
 	ErrOpen     = errors.New("irc: open connection")
 	ErrDone     = errors.New("irc: quit")
 )
 
-type (
-	MsgHandler func(string) string
-	StatusFunc func() string
-)
-
-// DialError XXX
 type DialError string
 
 func (d DialError) Error() string {
 	return "irc: dial: " + string(d)
 }
 
-// HandlerError XXX
 type HandlerError struct {
 	msg string
 	err string
@@ -38,28 +29,24 @@ func (d HandlerError) Error() string {
 	return "irc: handler '" + d.msg + "': " + d.err
 }
 
-func truncate(t time.Duration) time.Duration {
-	return t - t%time.Second
-}
+type MsgHandler func(string) string
 
-// Client XXX
 type Client struct {
-	conn     *irc.Conn
-	nick     string
-	user     string
-	channel  string
-	server   string
-	statusfn StatusFunc
-	ready    chan struct{}
-	done     chan struct{}
+	conn    *irc.Conn
+	nick    string
+	user    string
+	channel string
+	server  string
+	ready   chan struct{}
+	done    chan struct{}
+
+	statefunc func() string
+	actfunc   func(string)
 
 	msgMu  sync.RWMutex
 	msgMap map[string]MsgHandler
-
-	actHandler func(string)
 }
 
-// NewClient XXX
 func NewClient(nick, user, channel, server string) *Client {
 	return &Client{
 		nick:    nick,
@@ -72,13 +59,12 @@ func NewClient(nick, user, channel, server string) *Client {
 	}
 }
 
-// StatusFunc XXX
-func (c *Client) StatusFunc(s StatusFunc) {
-	c.statusfn = s
+func (c *Client) StateFunc(s func() string) {
+	c.statefunc = s
 }
 
-func (c *Client) ActHandler(f func(string)) {
-	c.actHandler = f
+func (c *Client) ActivityFunc(f func(string)) {
+	c.actfunc = f
 }
 
 // Handle registers the handler for the given string.
@@ -96,14 +82,12 @@ func (c *Client) send(cmd string, params []string) error {
 	return c.conn.Encode(msg)
 }
 
-// Send XXX
 // TODO: context
 func (c *Client) Send(cmd string, params []string) error {
 	<-c.ready
 	return c.send(cmd, params)
 }
 
-// NSend XXX
 func (c *Client) NSend(cmd string, params []string) error {
 	select {
 	case <-c.ready:
@@ -113,7 +97,6 @@ func (c *Client) NSend(cmd string, params []string) error {
 	}
 }
 
-// Register XXX
 func (c *Client) register() error {
 	if err := c.send(irc.CmdUser, []string{
 		c.user, "0", "*", ":" + c.user,
@@ -128,7 +111,6 @@ func (c *Client) register() error {
 	return nil
 }
 
-// Dial XXX
 func (c *Client) Dial() error {
 	if c.conn != nil {
 		c.conn.Close()
@@ -159,7 +141,6 @@ func (c *Client) pongHandler(msg *irc.Message) error {
 	return c.send(irc.CmdPong, msg.Params)
 }
 
-// SendMsg XXX
 func (c *Client) SendMsg(msg string) error {
 	if msg == "" {
 		return nil
@@ -167,7 +148,6 @@ func (c *Client) SendMsg(msg string) error {
 	return c.Send(irc.CmdPrivMsg, []string{c.channel, msg})
 }
 
-// NSendMsg XXX
 func (c *Client) NSendMsg(msg string) error {
 	if msg == "" {
 		return nil
@@ -175,12 +155,10 @@ func (c *Client) NSendMsg(msg string) error {
 	return c.NSend(irc.CmdPrivMsg, []string{c.channel, msg})
 }
 
-// Join XXX
 func (c *Client) join() error {
 	return c.send(irc.CmdJoin, []string{c.channel})
 }
 
-// Quit XXX
 func (c *Client) Quit() error {
 	defer c.quit()
 
@@ -248,10 +226,9 @@ func (c *Client) msgHandler(m *irc.Message) error {
 }
 
 func (c *Client) recActivity(m *irc.Message) {
-	c.actHandler(m.Name)
+	c.actfunc(m.Name)
 }
 
-// Listen XXX
 // TODO: context
 func (c *Client) listen() error {
 	if err := c.register(); err != nil {
@@ -282,10 +259,10 @@ func (c *Client) listen() error {
 				return err
 			}
 
-			if c.statusfn == nil {
+			if c.statefunc == nil {
 				break
 			}
-			if err := c.SendMsg(c.statusfn()); err != nil {
+			if err := c.SendMsg(c.statefunc()); err != nil {
 				return err
 			}
 

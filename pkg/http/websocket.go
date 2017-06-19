@@ -7,31 +7,109 @@ import (
 	"sync"
 	"time"
 
-	"bitbucket.org/multimfi/bot/alert"
+	"bitbucket.org/multimfi/bot/pkg/alert"
 
 	"github.com/gorilla/websocket"
 )
 
+// Constants related to websocket communication.
 const (
 	writeWait  = time.Second * 10
 	pongWait   = time.Minute
 	pingPeriod = (pongWait * 9) / 10
 )
 
-var upgrader = websocket.Upgrader{
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
-}
-
-var (
-	jsTrue  = []byte(`{"status": true}`)
-	jsFalse = []byte(`{"status": false}`)
+// Events communicated via websocket.
+const (
+	EventIRC = 1 << iota
+	EventAlert
+	EventResponder
 )
 
+// Possible states for responder.
+const (
+	StateActive = iota
+	StateFailed
+	StateUnknown
+)
+
+type wsAlert struct {
+	*alert.Alert
+	Hash    uint32 `json:"h"`
+	Current int32  `json:"c"`
+}
+
+type WSTyped struct {
+	Type uint8           `json:"t"`
+	Msg  json.RawMessage `json:"m"`
+}
+
+func wsAlertMsg(a *alert.Alert) ([]byte, error) {
+	d := &wsAlert{
+		Alert:   a,
+		Hash:    a.Hash(),
+		Current: a.Current(),
+	}
+
+	j, err := json.Marshal(d)
+	if err != nil {
+		return nil, err
+	}
+
+	r := &WSTyped{
+		Type: EventAlert,
+		Msg:  j,
+	}
+
+	return json.Marshal(r)
+}
+
+func (s *Server) ircState() ([]byte, error) {
+	r := &WSTyped{
+		Type: EventIRC,
+		Msg:  []byte{'0'},
+	}
+	if s.irc.IsReady() {
+		r.Msg[0] = '1'
+	}
+	return json.Marshal(r)
+}
+
+func (s *Server) responderState() ([]byte, error) {
+	lr := s.rpool.List()
+	if len(lr) < 1 {
+		return nil, nil
+	}
+	d := make(map[string]uint8, 0)
+
+	for _, v := range lr {
+		if v.Active() {
+			d[v.Name] = StateActive
+		} else if v.Failed() {
+			d[v.Name] = StateFailed
+		} else {
+			d[v.Name] = StateUnknown
+		}
+	}
+
+	j, err := json.Marshal(d)
+	if err != nil {
+		return nil, err
+	}
+
+	r := &WSTyped{
+		Type: EventResponder,
+		Msg:  j,
+	}
+
+	return json.Marshal(r)
+}
+
+// subpool is a pool of websocket subscriptions.
 type subpool struct {
-	mu sync.RWMutex
-	id uint64
-	m  map[uint64]*client
+	mu  sync.RWMutex // guards id and m
+	seq uint64
+	m   map[uint64]*client
 }
 
 type client struct {
@@ -45,88 +123,33 @@ func newPool() *subpool {
 	}
 }
 
-type wsAlert struct {
-	*alert.Alert
-	Hash       uint32   `json:"hash"`
-	Responders []string `json:"responders"`
-	Current    int32    `json:"current"`
+func (s *subpool) unsubscribe(c *client) {
+	s.mu.Lock()
+	if _, exists := s.m[c.id]; exists {
+		close(c.ch)
+		delete(s.m, c.id)
+	}
+	s.mu.Unlock()
 }
 
-type wsResponder struct {
-	Name  string `json:"name"`
-	State string `json:"state"`
+// subscribe returns a client with an unique id.
+// uniqueness is guaranteed by always incrementing subpool sequence number.
+func (s *subpool) subscribe() *client {
+	s.mu.Lock()
+	s.seq++
+
+	c := &client{
+		id: s.seq,
+		ch: make(chan []byte, 4),
+	}
+	s.m[c.id] = c
+
+	s.mu.Unlock()
+	return c
 }
 
-type wsTyped struct {
-	Type string          `json:"type"`
-	Msg  json.RawMessage `json:"msg"`
-}
-
-func wsAlertMsg(a *alert.Alert) ([]byte, error) {
-	d := &wsAlert{
-		Alert:      a,
-		Hash:       a.Hash(),
-		Responders: a.Responders(),
-		Current:    a.Current(),
-	}
-
-	j, err := json.Marshal(d)
-	if err != nil {
-		return nil, err
-	}
-
-	r := &wsTyped{
-		Type: "alert",
-		Msg:  j,
-	}
-
-	return json.Marshal(r)
-}
-
-func (s *Server) ircState() ([]byte, error) {
-	r := &wsTyped{
-		Type: "irc",
-	}
-	if s.irc.IsReady() {
-		r.Msg = jsTrue
-	} else {
-		r.Msg = jsFalse
-	}
-	return json.Marshal(r)
-}
-
-func (s *Server) responderState() ([]byte, error) {
-	lr := s.rpool.List()
-	if len(lr) < 1 {
-		return nil, nil
-	}
-	d := make([]*wsResponder, 0)
-
-	for _, v := range lr {
-		i := &wsResponder{Name: v.Name}
-		if v.Active() {
-			i.State = "active"
-		} else if v.Failed() {
-			i.State = "failed"
-		} else {
-			i.State = "unknown"
-		}
-		d = append(d, i)
-	}
-
-	j, err := json.Marshal(d)
-	if err != nil {
-		return nil, err
-	}
-
-	r := &wsTyped{
-		Type: "responders",
-		Msg:  j,
-	}
-
-	return json.Marshal(r)
-}
-
+// broadcast does a non-blocking send to all subscribed clients.
+// does not guarantee that clients receive sent bytes.
 func (s *subpool) broadcast(b []byte) {
 	s.mu.RLock()
 	for k, v := range s.m {
@@ -168,29 +191,6 @@ func (s *Server) broadcastResponders() {
 	}
 }
 
-func (s *subpool) unsubscribe(c *client) {
-	s.mu.Lock()
-	if _, exists := s.m[c.id]; exists {
-		close(c.ch)
-		delete(s.m, c.id)
-	}
-	s.mu.Unlock()
-}
-
-func (s *subpool) subscribe() *client {
-	s.mu.Lock()
-	s.id++
-
-	c := &client{
-		id: s.id,
-		ch: make(chan []byte, 4),
-	}
-	s.m[c.id] = c
-
-	s.mu.Unlock()
-	return c
-}
-
 func wsWriter(ac *client, ws *websocket.Conn) {
 	pt := time.NewTicker(pingPeriod)
 	defer pt.Stop()
@@ -217,6 +217,11 @@ func wsWriter(ac *client, ws *websocket.Conn) {
 	}
 }
 
+var upgrader = websocket.Upgrader{
+	ReadBufferSize:  1024,
+	WriteBufferSize: 1024,
+}
+
 func (s *Server) wsHandler(w http.ResponseWriter, r *http.Request) {
 	ws, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -227,7 +232,8 @@ func (s *Server) wsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer ws.Close()
 
-	ws.SetReadLimit(32)
+	// not expecting more than a single byte of data.
+	ws.SetReadLimit(1)
 	ws.SetReadDeadline(time.Now().Add(pongWait))
 	ws.SetPongHandler(func(string) error { ws.SetReadDeadline(time.Now().Add(pongWait)); return nil })
 
@@ -241,8 +247,22 @@ func (s *Server) wsHandler(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 
-		switch string(msg) {
-		case "alerts":
+		if len(msg) < 1 {
+			log.Printf("early: invalid command %X from %q", msg, ws.RemoteAddr())
+			continue
+		}
+		m := msg[0]
+
+		if (m & EventIRC) != 0 {
+			r, err := s.ircState()
+			if err != nil {
+				log.Printf("websocket: reader error %v", err)
+				break
+			}
+			ac.ch <- r
+		}
+
+		if (m & EventAlert) != 0 {
 			for _, v := range s.pool.List() {
 				r, err := wsAlertMsg(v)
 				if err != nil {
@@ -251,14 +271,9 @@ func (s *Server) wsHandler(w http.ResponseWriter, r *http.Request) {
 				}
 				ac.ch <- r
 			}
-		case "irc":
-			r, err := s.ircState()
-			if err != nil {
-				log.Printf("websocket: reader error %v", err)
-				break
-			}
-			ac.ch <- r
-		case "responders":
+		}
+
+		if (m & EventResponder) != 0 {
 			r, err := s.responderState()
 			if err != nil {
 				log.Printf("websocket: reader error %v", err)
@@ -267,9 +282,33 @@ func (s *Server) wsHandler(w http.ResponseWriter, r *http.Request) {
 			if r != nil {
 				ac.ch <- r
 			}
+		}
+	}
+}
 
-		default:
-			log.Printf("invalid command %s from %q", string(msg), ws.RemoteAddr())
+// pollHandler can be used as a simple "longpoll".
+// TODO: bundled events, resumed poll.
+func (s *Server) pollHandler(w http.ResponseWriter, r *http.Request) {
+	ac := s.spool.subscribe()
+	defer s.spool.unsubscribe(ac)
+
+	var cc <-chan bool
+	if c, ok := w.(http.CloseNotifier); ok {
+		cc = c.CloseNotify()
+	}
+
+	w.(http.Flusher).Flush()
+
+	for {
+		select {
+		case <-cc:
+			return
+		case a, ok := <-ac.ch:
+			if !ok {
+				return
+			}
+			w.Write(a)
+			return
 		}
 	}
 }

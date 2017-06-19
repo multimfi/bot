@@ -10,9 +10,9 @@ import (
 	"net/http"
 	"time"
 
-	"bitbucket.org/multimfi/bot/alert"
-	"bitbucket.org/multimfi/bot/irc"
-	"bitbucket.org/multimfi/bot/responder"
+	"bitbucket.org/multimfi/bot/pkg/alert"
+	"bitbucket.org/multimfi/bot/pkg/irc"
+	"bitbucket.org/multimfi/bot/pkg/responder"
 )
 
 var ErrChanClosed = errors.New("alertmanager: closed channel")
@@ -36,27 +36,30 @@ func NewServer(irc *irc.Client, srv *http.ServeMux) *Server {
 
 	srv.HandleFunc("/alertmanager", r.alertManagerHandler)
 	srv.HandleFunc("/ws", r.wsHandler)
+	srv.HandleFunc("/p", r.pollHandler)
 
-	irc.StatusFunc(r.statusFunc)
+	irc.StateFunc(r.statusFunc)
 	irc.Handle("!clear", r.clear)
 	irc.Handle("!reset", func(m string) string {
 		if !r.rpool.ResetFailed(m) {
-			return "not failed"
+			return m + ": not in a failed state."
 		}
 		r.broadcastResponders()
-		return "tada!"
+		return m + ": tada!"
 	})
 
-	irc.ActHandler(r.rpool.Update)
+	irc.ActivityFunc(r.rpool.Update)
 
 	srv.HandleFunc("/", r.statusPageHandler)
 
 	return r
 }
 
-func (s *Server) clear(string) string {
-	s.pool.Reset()
-	return "tada!"
+func (s *Server) clear(m string) string {
+	if s.pool.Reset() {
+		return m + ": tada!"
+	}
+	return m + ": no alerts!"
 }
 
 func (s *Server) alert(a *alert.Alert) {
@@ -189,6 +192,7 @@ func (s *Server) Dial() error {
 	for {
 		err := s.irc.Dial()
 		if err == irc.ErrDone {
+			s.broadcastIRC()
 			return nil
 		}
 
@@ -201,7 +205,9 @@ func (s *Server) Dial() error {
 			d = time.Second
 		}
 
-		s.broadcastIRC()
+		if d < time.Second*2 {
+			s.broadcastIRC()
+		}
 
 		log.Printf("server: error %[1]q, %[1]T, reconnecting in %[2]s", err, d)
 		time.Sleep(d)

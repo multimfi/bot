@@ -6,6 +6,14 @@ var indexHTML = []byte(`<!DOCTYPE html>
 <title>bot</title>
 <script type="text/javascript">
 window.onload = function () {
+	const EventIRC = 1 << 0;
+	const EventAlert = 1 << 1;
+	const EventResponder = 1 << 2;
+
+	const StateActive = 0;
+	const StateFailed = 1;
+	const StateUnknown = 2;
+
 	var conn;
 
 	var interval = 0;
@@ -31,15 +39,15 @@ window.onload = function () {
 
 		"startsAt": function(obj, item) {
 			if (obj.status != "firing") {
-				delete(alerts[obj.hash].updater)
+				delete(alerts[obj.h].updater)
 				return;
 			}
-			alerts[obj.hash].updater = function(t) {
+			alerts[obj.h].updater = function(t) {
 				var d = new Date(obj["startsAt"]);
 				item.innerHTML = obj["startsAt"]
 				item.innerHTML += "<br><b>" + since(t, d) + "</b>";
 			}
-			alerts[obj.hash].updater(Date.now())
+			alerts[obj.h].updater(Date.now())
 		},
 
 		"endsAt": function(obj, item) {
@@ -58,13 +66,14 @@ window.onload = function () {
 				return;
 			}
 
-			var r = obj["responders"];
+			var r = obj["labels"]["responders"];
 			if (!r) {
 				item.innerHTML = "none";
 				return;
 			}
-			item.innerHTML = "<b>" + r[obj.current] + "</b>";
-			item.innerHTML += "<br>" + obj.responders;
+			var s = r.split(" ");
+			item.innerHTML = "<b>" + s[obj.c] + "</b>";
+			item.innerHTML += "<br>" + s;
 		}
 	}
 
@@ -117,17 +126,17 @@ window.onload = function () {
 
 	function updateState(obj) {
 		var alertItem;
-		if (!alerts[obj.hash]) {
+		if (!alerts[obj.h]) {
 			alertItem = document.createElement("tr");
 			alertItem.classList.add("alert")
-			alerts[obj.hash] = alertItem;
+			alerts[obj.h] = alertItem;
 			state.appendChild(alertItem);
 		} else {
-			alertItem = alerts[obj.hash];
+			alertItem = alerts[obj.h];
 		}
 
 		setState(alertItem, obj.status);
-		alertItem.id = obj.hash;
+		alertItem.id = obj.h;
 		for (name in labels) {
 			var item = getChild(name, alertItem);
 			if (!item) {
@@ -147,7 +156,7 @@ window.onload = function () {
 
 	function updateIRC(obj) {
 		var e = document.getElementById("irc")
-		if (obj.status != true) {
+		if (obj < 1) {
 			e.style.color = "red";
 			e.innerHTML = "FAIL!";
 			return
@@ -157,23 +166,22 @@ window.onload = function () {
 	}
 
 	colormap = {
-		"active": "green",
-		"failed": "red",
-		"unknown": "black",
+		0: "green",
+		1: "red",
+		2: "black",
 	}
 
 	function updateResponders(obj) {
 		var e = document.getElementById("responders")
-		for (r in obj) {
-			var res = obj[r];
-			var item = getChild(res.name, e);
+		for (n in obj) {
+			var item = getChild(n, e);
 			if (!item) {
 				item = document.createElement("span");
 				e.appendChild(item)
-				item.name = res.name;
-				item.innerHTML = res.name;
+				item.name = n;
+				item.innerHTML = n;
 			}
-			item.style.color = colormap[res.state];
+			item.style.color = colormap[obj[n]];
 		}
 	}
 
@@ -186,26 +194,26 @@ window.onload = function () {
 
 	conn = new WebSocket("ws://" + document.location.host + "/ws");
 	conn.onopen = function() {
-		conn.send("alerts");
-		conn.send("irc");
-		conn.send("responders");
+		conn.send(String.fromCharCode(
+			EventIRC|EventAlert|EventResponder
+		))
 	};
 	conn.onclose = function (evt) {
-		var item = document.createElement("div");
-		item.innerHTML = "<b>Connection closed.</b>";
-		document.body.append(item);
+		var item = document.getElementById("err");
+		item.style.color = "red";
+		item.innerHTML = "<h1>Connection closed.</h1>";
 	};
 	conn.onmessage = function (evt) {
 		var obj = JSON.parse(evt.data);
-		switch(obj.type) {
-		case "alert":
-			updateState(obj.msg);
+		switch(obj.t) {
+		case EventAlert:
+			updateState(obj.m);
 			break;
-		case "irc":
-			updateIRC(obj.msg);
+		case EventIRC:
+			updateIRC(obj.m);
 			break;
-		case "responders":
-			updateResponders(obj.msg);
+		case EventResponder:
+			updateResponders(obj.m);
 			break;
 		}
 
@@ -266,6 +274,7 @@ td {
 </style>
 </head>
 <body>
+<div id="err"></div>
 <p>IRC <b><span id="irc">TBD</span></b></p>
 <h4>Responders</h4>
 <div id="responders"></div>
