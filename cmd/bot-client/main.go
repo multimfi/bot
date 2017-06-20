@@ -5,8 +5,10 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"runtime"
+	"time"
 
 	"bitbucket.org/multimfi/bot/pkg/alert"
 	"bitbucket.org/multimfi/bot/pkg/http"
@@ -121,6 +123,20 @@ func main() {
 	if err := c.ws.WriteMessage(websocket.TextMessage, []byte{http.EventAlert}); err != nil {
 		log.Fatal(err)
 	}
+
+	c.ws.SetPingHandler(func(m string) error {
+		err := c.ws.SetReadDeadline(time.Now().Add(http.PongWait))
+		if err != nil {
+			return err
+		}
+		err = c.ws.WriteControl(websocket.PongMessage, []byte(m), time.Now().Add(http.WriteWait))
+		if err == websocket.ErrCloseSent {
+			return nil
+		} else if e, ok := err.(net.Error); ok && e.Temporary() {
+			return nil
+		}
+		return err
+	})
 
 	for {
 		_, p, err := c.ws.ReadMessage()

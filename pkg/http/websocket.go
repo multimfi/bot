@@ -14,9 +14,9 @@ import (
 
 // Constants related to websocket communication.
 const (
-	writeWait  = time.Second * 10
-	pongWait   = time.Minute
-	pingPeriod = (pongWait * 9) / 10
+	WriteWait  = time.Second * 10
+	PongWait   = time.Minute
+	PingPeriod = (PongWait * 9) / 10
 )
 
 // Events communicated via websocket.
@@ -193,13 +193,13 @@ func (s *Server) broadcastResponders() {
 }
 
 func wsWriter(ac *client, ws *websocket.Conn) {
-	pt := time.NewTicker(pingPeriod)
+	pt := time.NewTicker(PingPeriod)
 	defer pt.Stop()
 
 	for {
 		select {
 		case a, ok := <-ac.ch:
-			ws.SetWriteDeadline(time.Now().Add(writeWait))
+			ws.SetWriteDeadline(time.Now().Add(WriteWait))
 			if !ok {
 				ws.WriteMessage(websocket.CloseMessage, []byte{})
 				return
@@ -210,7 +210,7 @@ func wsWriter(ac *client, ws *websocket.Conn) {
 			}
 
 		case <-pt.C:
-			ws.SetWriteDeadline(time.Now().Add(writeWait))
+			ws.SetWriteDeadline(time.Now().Add(WriteWait))
 			if err := ws.WriteMessage(websocket.PingMessage, []byte{}); err != nil {
 				return
 			}
@@ -235,8 +235,8 @@ func (s *Server) wsHandler(w http.ResponseWriter, r *http.Request) {
 
 	// not expecting more than a single byte of data.
 	ws.SetReadLimit(1)
-	ws.SetReadDeadline(time.Now().Add(pongWait))
-	ws.SetPongHandler(func(string) error { ws.SetReadDeadline(time.Now().Add(pongWait)); return nil })
+	ws.SetReadDeadline(time.Now().Add(PongWait))
+	ws.SetPongHandler(func(string) error { ws.SetReadDeadline(time.Now().Add(PongWait)); return nil })
 
 	ac := s.spool.subscribe()
 	go wsWriter(ac, ws)
