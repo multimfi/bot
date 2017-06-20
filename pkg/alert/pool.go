@@ -5,17 +5,20 @@ import (
 	"sync"
 )
 
+// Pool stores alerts in a map by alert.Hash().
 type Pool struct {
 	alertsMu sync.RWMutex
 	alerts   map[uint32]*Alert
 }
 
+// NewPool returns a new empty alert Pool.
 func NewPool() *Pool {
 	return &Pool{
 		alerts: make(map[uint32]*Alert),
 	}
 }
 
+// Reset clears the internal map of Pool.
 func (p *Pool) Reset() bool {
 	p.alertsMu.Lock()
 
@@ -30,6 +33,7 @@ func (p *Pool) Reset() bool {
 	return b != a
 }
 
+// List returns a slice sorted by StartsAt of current alerts.
 func (p *Pool) List() []*Alert {
 	p.alertsMu.RLock()
 
@@ -46,6 +50,9 @@ func (p *Pool) List() []*Alert {
 	return r
 }
 
+// Add adds alert a to pool, if alert exists
+// the current alert is returned.
+// Returned bool indicates successful addition.
 func (p *Pool) Add(a *Alert) (bool, *Alert) {
 	p.alertsMu.Lock()
 
@@ -61,6 +68,8 @@ func (p *Pool) Add(a *Alert) (bool, *Alert) {
 	return true, a
 }
 
+// Remove deletes alert a from pool,
+// returns true on success.
 func (p *Pool) Remove(a *Alert) bool {
 	p.alertsMu.Lock()
 

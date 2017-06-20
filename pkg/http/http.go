@@ -15,12 +15,14 @@ import (
 	"bitbucket.org/multimfi/bot/pkg/responder"
 )
 
-var ErrChanClosed = errors.New("alertmanager: closed channel")
+var errChanClosed = errors.New("alertmanager: closed channel")
 
+// ReceiverGroup is a mapped group of receivers, nil is considered an empty group.
 type ReceiverGroup map[string][]string
 
+// Server tracks alerts received from prometheus alertmanager.
 type Server struct {
-	irc     *irc.Client
+	irc     irc.Client
 	pool    *alert.Pool
 	rpool   *responder.Pool
 	spool   *subpool
@@ -28,7 +30,8 @@ type Server struct {
 	rg      ReceiverGroup
 }
 
-func NewServer(irc *irc.Client, srv *http.ServeMux, rg ReceiverGroup) *Server {
+// NewServer registers and returns a new Server.
+func NewServer(irc irc.Client, srv *http.ServeMux, rg ReceiverGroup) *Server {
 	r := &Server{
 		irc:     irc,
 		pool:    alert.NewPool(),
@@ -41,29 +44,30 @@ func NewServer(irc *irc.Client, srv *http.ServeMux, rg ReceiverGroup) *Server {
 	srv.HandleFunc("/alertmanager", r.alertManagerHandler)
 	srv.HandleFunc("/ws", r.wsHandler)
 	srv.HandleFunc("/p", r.pollHandler)
+	srv.HandleFunc("/", r.statusPageHandler)
+
+	irc.Handle("!clear", r.clear)
+	irc.Handle("!reset", r.reset)
 
 	irc.StateFunc(r.statusFunc)
-	irc.Handle("!clear", r.clear)
-	irc.Handle("!reset", func(m string) string {
-		if !r.rpool.ResetFailed(m) {
-			return m + ": not in a failed state."
-		}
-		r.broadcastResponders()
-		return m + ": tada!"
-	})
-
 	irc.ActivityFunc(r.rpool.Update)
-
-	srv.HandleFunc("/", r.statusPageHandler)
 
 	return r
 }
 
-func (s *Server) clear(m string) string {
-	if s.pool.Reset() {
-		return m + ": tada!"
+func (s *Server) reset(m string) string {
+	if !s.rpool.ResetFailed(m) {
+		return m + ": not in a failed state."
 	}
-	return m + ": no alerts!"
+	s.broadcastResponders()
+	return m + ": tada!"
+}
+
+func (s *Server) clear(m string) string {
+	if !s.pool.Reset() {
+		return m + ": no alerts!"
+	}
+	return m + ": tada!"
 }
 
 func (s *Server) alert(a *alert.Alert) {
@@ -108,7 +112,7 @@ func (s *Server) alert(a *alert.Alert) {
 
 	s.spool.broadcastAlert(ca)
 
-	if err = s.irc.NSendMsg(m); err != nil {
+	if err = s.irc.NSendMsg("A " + m); err != nil {
 		log.Printf("alert: error: %v", err)
 	}
 }
@@ -120,11 +124,12 @@ func (s *Server) resolve(a *alert.Alert) {
 
 	s.spool.broadcastAlert(a)
 
-	if err := s.irc.NSendMsg(a.String()); err != nil {
+	if err := s.irc.NSendMsg("r " + a.String()); err != nil {
 		log.Printf("resolve: error: %v", err)
 	}
 }
 
+// AlertManager consumes alerts from alertCh.
 func (s *Server) AlertManager() error {
 	for a := range s.alertCh {
 		switch a.Status {
@@ -136,8 +141,7 @@ func (s *Server) AlertManager() error {
 			log.Printf("alertmanager: invalid alert: %v", a)
 		}
 	}
-
-	return ErrChanClosed
+	return errChanClosed
 }
 
 func unmarshal(data io.Reader) (*alert.Data, error) {
@@ -203,6 +207,7 @@ func (s *Server) statusFunc() string {
 	return ""
 }
 
+// Dial connects server to irc, reconnects on failure.
 func (s *Server) Dial() error {
 	var d = time.Second
 

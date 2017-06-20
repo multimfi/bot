@@ -2,6 +2,7 @@ package alert
 
 import "time"
 
+// Valid alert states.
 const (
 	AlertFiring   = "firing"
 	AlertResolved = "resolved"

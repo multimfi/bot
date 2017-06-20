@@ -26,7 +26,11 @@ bot-client:
 
 install: bot-client
 	install bot-client $(HOME)/.local/bin/bot-client
+
 test:
 	CGO_ENABLED=1 go test -race ./pkg/...
+
+clean:
+	rm -v bot-client bot-daemon
 
 .PHONY: bot-daemon bot-client

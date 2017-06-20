@@ -9,17 +9,21 @@ import (
 )
 
 var (
+	// ErrNotReady is returned when current connection is not ready to receive packages.
 	ErrNotReady = errors.New("irc: client not ready")
-	ErrOpen     = errors.New("irc: open connection")
-	ErrDone     = errors.New("irc: quit")
+
+	// ErrDone is returned when client has quit.
+	ErrDone = errors.New("irc: quit")
 )
 
+// DialError is returned when Dial fails connecting to server.
 type DialError string
 
 func (d DialError) Error() string {
 	return "irc: dial: " + string(d)
 }
 
+// HandlerError is returned when a message handler fails a non-blocking send.
 type HandlerError struct {
 	msg string
 	err string
@@ -29,9 +33,10 @@ func (d HandlerError) Error() string {
 	return "irc: handler '" + d.msg + "': " + d.err
 }
 
+// MsgHandler takes a username, sends returned string as non-blocking.
 type MsgHandler func(string) string
 
-type Client struct {
+type ircClient struct {
 	conn    *irc.Conn
 	nick    string
 	user    string
@@ -47,8 +52,9 @@ type Client struct {
 	msgMap map[string]MsgHandler
 }
 
-func NewClient(nick, user, channel, server string) *Client {
-	return &Client{
+// NewClient returns a new irc client.
+func NewClient(nick, user, channel, server string) Client {
+	return &ircClient{
 		nick:    nick,
 		user:    user,
 		channel: channel,
@@ -59,22 +65,25 @@ func NewClient(nick, user, channel, server string) *Client {
 	}
 }
 
-func (c *Client) StateFunc(s func() string) {
+// StateFunc registers a statefunction for client,
+// function is ran when listen receives welcome msg.
+func (c *ircClient) StateFunc(s func() string) {
 	c.statefunc = s
 }
 
-func (c *Client) ActivityFunc(f func(string)) {
+// ActivityFunc tracks activity for user.
+func (c *ircClient) ActivityFunc(f func(string)) {
 	c.actfunc = f
 }
 
 // Handle registers the handler for the given string.
-func (c *Client) Handle(msg string, f MsgHandler) {
+func (c *ircClient) Handle(msg string, f MsgHandler) {
 	c.msgMu.Lock()
 	c.msgMap[msg] = f
 	c.msgMu.Unlock()
 }
 
-func (c *Client) send(cmd string, params []string) error {
+func (c *ircClient) send(cmd string, params []string) error {
 	msg := &irc.Message{
 		Command: cmd,
 		Params:  params,
@@ -82,13 +91,15 @@ func (c *Client) send(cmd string, params []string) error {
 	return c.conn.Encode(msg)
 }
 
-// TODO: context
-func (c *Client) Send(cmd string, params []string) error {
+// Send waits for connection readiness before sending.
+func (c *ircClient) Send(cmd string, params []string) error {
 	<-c.ready
 	return c.send(cmd, params)
 }
 
-func (c *Client) NSend(cmd string, params []string) error {
+// NSend is a non-blocking version of Send,
+// returns ErrNotReady if connection is not ready.
+func (c *ircClient) NSend(cmd string, params []string) error {
 	select {
 	case <-c.ready:
 		return c.send(cmd, params)
@@ -97,7 +108,7 @@ func (c *Client) NSend(cmd string, params []string) error {
 	}
 }
 
-func (c *Client) register() error {
+func (c *ircClient) register() error {
 	if err := c.send(irc.CmdUser, []string{
 		c.user, "0", "*", ":" + c.user,
 	}); err != nil {
@@ -111,7 +122,8 @@ func (c *Client) register() error {
 	return nil
 }
 
-func (c *Client) Dial() error {
+// Dial connects and registers to server, blocks until error.
+func (c *ircClient) Dial() error {
 	if c.conn != nil {
 		c.conn.Close()
 	}
@@ -137,29 +149,32 @@ func (c *Client) Dial() error {
 	return nil
 }
 
-func (c *Client) pongHandler(msg *irc.Message) error {
+func (c *ircClient) pongHandler(msg *irc.Message) error {
 	return c.send(irc.CmdPong, msg.Params)
 }
 
-func (c *Client) SendMsg(msg string) error {
+// SendMsg sends msg to channel in client config.
+func (c *ircClient) SendMsg(msg string) error {
 	if msg == "" {
 		return nil
 	}
 	return c.Send(irc.CmdPrivMsg, []string{c.channel, msg})
 }
 
-func (c *Client) NSendMsg(msg string) error {
+// NSendMsg is a nonblocking version of SendMsg.
+func (c *ircClient) NSendMsg(msg string) error {
 	if msg == "" {
 		return nil
 	}
 	return c.NSend(irc.CmdPrivMsg, []string{c.channel, msg})
 }
 
-func (c *Client) join() error {
+func (c *ircClient) join() error {
 	return c.send(irc.CmdJoin, []string{c.channel})
 }
 
-func (c *Client) Quit() error {
+// Quit closes the current connection.
+func (c *ircClient) Quit() error {
 	defer c.quit()
 
 	// blocks requests until reconnected
@@ -172,7 +187,7 @@ func (c *Client) Quit() error {
 	return nil
 }
 
-func (c *Client) quit() {
+func (c *ircClient) quit() {
 	select {
 	case <-c.done:
 		break
@@ -181,7 +196,7 @@ func (c *Client) quit() {
 	}
 }
 
-func (c *Client) setready() {
+func (c *ircClient) setready() {
 	select {
 	case <-c.ready:
 		break
@@ -190,7 +205,8 @@ func (c *Client) setready() {
 	}
 }
 
-func (c *Client) IsReady() bool {
+// IsReady returns the connection readiness.
+func (c *ircClient) IsReady() bool {
 	select {
 	case <-c.ready:
 		return true
@@ -199,7 +215,7 @@ func (c *Client) IsReady() bool {
 	}
 }
 
-func (c *Client) msgHandler(m *irc.Message) error {
+func (c *ircClient) msgHandler(m *irc.Message) error {
 	var (
 		dst string
 		msg string
@@ -225,12 +241,12 @@ func (c *Client) msgHandler(m *irc.Message) error {
 	return nil
 }
 
-func (c *Client) recActivity(m *irc.Message) {
+func (c *ircClient) recActivity(m *irc.Message) {
 	c.actfunc(m.Name)
 }
 
 // TODO: context
-func (c *Client) listen() error {
+func (c *ircClient) listen() error {
 	if err := c.register(); err != nil {
 		return err
 	}

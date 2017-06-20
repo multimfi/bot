@@ -39,6 +39,7 @@ type wsAlert struct {
 	Current int32  `json:"c"`
 }
 
+// WSTyped is a typed json message.
 type WSTyped struct {
 	Type uint8           `json:"t"`
 	Msg  json.RawMessage `json:"m"`

@@ -27,7 +27,7 @@ func putBuf(b []byte) {
 func (a *Alert) names() []string {
 	var ret []string
 
-	for k, _ := range a.Labels {
+	for k := range a.Labels {
 		ret = append(ret, k)
 	}
 	sort.Strings(ret)
@@ -35,6 +35,7 @@ func (a *Alert) names() []string {
 	return ret
 }
 
+// Hash retuns a crc32 checksum from alert labels.
 func (a *Alert) Hash() uint32 {
 	b := getBuf()
 	defer putBuf(b)
@@ -59,6 +60,16 @@ func (a *Alert) lasted() time.Duration {
 	return a.EndsAt.Sub(a.StartsAt)
 }
 
+// SetCurrent sets the current expected responder for alert to i atomically.
+func (a *Alert) SetCurrent(i int32) {
+	atomic.StoreInt32(&a.current, i)
+}
+
+// Current returns the current expected responder for alert atomically.
+func (a *Alert) Current() int32 {
+	return atomic.LoadInt32(&a.current)
+}
+
 func kdv(m map[string]string, k, v string) string {
 	if r, ok := m[k]; ok {
 		return r
@@ -66,19 +77,12 @@ func kdv(m map[string]string, k, v string) string {
 	return v
 }
 
-func (a *Alert) SetCurrent(i int32) {
-	atomic.StoreInt32(&a.current, i)
-}
-
-func (a *Alert) Current() int32 {
-	return atomic.LoadInt32(&a.current)
-}
-
+// String returns a consise summary for alert.
 func (a *Alert) String() string {
 	switch a.Status {
 	case AlertFiring:
 		return fmt.Sprintf(
-			"A %s: %s, %s: %s (since %s)",
+			"%s: %s, %s: %s (since %s)",
 			kdv(a.Labels, "instance", "none"),
 			kdv(a.Labels, "job", "none"),
 			kdv(a.Labels, "alertname", "unnamed"),
@@ -87,7 +91,7 @@ func (a *Alert) String() string {
 		)
 	case AlertResolved:
 		return fmt.Sprintf(
-			"r %s: %s, %s: %s (lasted %s)",
+			"%s: %s, %s: %s (lasted %s)",
 			kdv(a.Labels, "instance", "none"),
 			kdv(a.Labels, "job", "none"),
 			kdv(a.Labels, "alertname", "unnamed"),

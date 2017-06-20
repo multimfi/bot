@@ -18,6 +18,8 @@ func (f *fakeTime) now() time.Time {
 }
 
 func TestPoolGet(t *testing.T) {
+	t.Parallel()
+
 	f := &fakeTime{}
 	now = f.now
 
@@ -26,17 +28,21 @@ func TestPoolGet(t *testing.T) {
 	tc := []struct {
 		n int
 		w int
+		e bool
 	}{
-		{0, 0},
-		{3, 3},
-		{2, 1},
-		{1, 2},
+		{0, 0, true},
+		{3, 3, true},
+		{2, 1, true},
+		{1, 2, true},
+		{3, 0, false},
+		{2, 2, false},
+		{1, 1, false},
 	}
 	for _, v := range tc {
 		f.set(v.n)
 		_, r, _ := p.Get(data)
-		if r != v.w {
-			t.Errorf("%d != %d", r, v.w)
+		if v.e == (r != v.w) {
+			t.Errorf("%d != %d (%v)", r, v.w, v.e)
 		}
 	}
 }

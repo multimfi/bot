@@ -6,21 +6,26 @@ import (
 	"time"
 )
 
-var ErrNoResponse = errors.New("all responders failed")
-
+// for testing
 var now = time.Now
 
+// ErrNoResponse only returned on Pool.Get() failure.
+var ErrNoResponse = errors.New("all responders failed")
+
+// Pool is a pool of Responders mapped by name.
 type Pool struct {
 	poolMu sync.RWMutex
 	pool   map[string]*Responder
 }
 
+// NewPool returns an empty Pool.
 func NewPool() *Pool {
 	return &Pool{
 		pool: make(map[string]*Responder),
 	}
 }
 
+// Add adds responder r to Pool if r is not already in pool.
 func (p *Pool) Add(r *Responder) {
 	p.poolMu.Lock()
 
@@ -33,6 +38,7 @@ func (p *Pool) Add(r *Responder) {
 	p.poolMu.Unlock()
 }
 
+// List returns a slice of current responders.
 func (p *Pool) List() []*Responder {
 	p.poolMu.RLock()
 
@@ -79,6 +85,7 @@ func (p *Pool) get(name string, add bool) *Responder {
 }
 
 // Get returns ErrNoResponse when all responders are in failed state.
+// All non existant elements of r are added to Pool.
 func (p *Pool) Get(r []string) (*Responder, int, error) {
 	_, w := now().ISOWeek()
 	l := len(r)
@@ -99,11 +106,16 @@ func (p *Pool) Get(r []string) (*Responder, int, error) {
 	return nil, 0, ErrNoResponse
 }
 
+// Update increments the tickcounter for name.
+// Does not add name to pool.
 func (p *Pool) Update(name string) {
 	r := p.get(name, false)
 	r.Update()
 }
 
+// ResetFailed resets failed state for name,
+// returns true if name was in a failed state.
+// Adds name to pool if it does not exist.
 func (p *Pool) ResetFailed(name string) bool {
 	r := p.get(name, true)
 	return r.resetFailed()

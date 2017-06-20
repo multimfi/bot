@@ -11,6 +11,7 @@ const (
 	liveness = time.Minute * 30
 )
 
+// Responder tracks responder state.
 type Responder struct {
 	Name     string
 	lastTick uint64
@@ -21,6 +22,7 @@ type Responder struct {
 	failed bool
 }
 
+// Update increments an internal counter atomically.
 func (r *Responder) Update() {
 	atomic.AddUint64(&r.lastTick, 1)
 }
@@ -29,12 +31,15 @@ func (r *Responder) get() uint64 {
 	return atomic.LoadUint64(&r.lastTick)
 }
 
+// Active returns true if responder is considered active.
 func (r *Responder) Active() bool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.active
 }
 
+// Failed returns true if responder is considered failed,
+// state can only be reset with resetFailed().
 func (r *Responder) Failed() bool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
