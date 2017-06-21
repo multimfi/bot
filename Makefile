@@ -19,10 +19,10 @@ default: bot-daemon
 all: test bot-daemon bot-client
 
 bot-daemon:
-	CGO_ENABLED=0 go build -i -ldflags "-X main.buildversion=$(VERSION)" -v bitbucket.org/multimfi/bot/cmd/bot-daemon
+	CGO_ENABLED=0 go build -i -ldflags "-X main.buildversion=$(VERSION)" -v github.com/multimfi/bot/cmd/bot-daemon
 
 bot-client:
-	CGO_ENABLED=0 go build -i -ldflags "-X main.buildversion=$(VERSION)" -v bitbucket.org/multimfi/bot/cmd/bot-client
+	CGO_ENABLED=0 go build -i -ldflags "-X main.buildversion=$(VERSION)" -v github.com/multimfi/bot/cmd/bot-client
 
 install: bot-client
 	install bot-client $(HOME)/.local/bin/bot-client

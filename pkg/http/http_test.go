@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"bitbucket.org/multimfi/bot/pkg/irc/irctest"
+	"github.com/multimfi/bot/pkg/irc/irctest"
 )
 
 var testAlert = []byte(`

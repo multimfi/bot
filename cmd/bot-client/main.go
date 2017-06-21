@@ -10,8 +10,8 @@ import (
 	"runtime"
 	"time"
 
-	"bitbucket.org/multimfi/bot/pkg/alert"
-	"bitbucket.org/multimfi/bot/pkg/http"
+	"github.com/multimfi/bot/pkg/alert"
+	"github.com/multimfi/bot/pkg/http"
 
 	"github.com/godbus/dbus"
 	"github.com/gorilla/websocket"

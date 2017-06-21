@@ -10,9 +10,9 @@ import (
 	"net/http"
 	"time"
 
-	"bitbucket.org/multimfi/bot/pkg/alert"
-	"bitbucket.org/multimfi/bot/pkg/irc"
-	"bitbucket.org/multimfi/bot/pkg/responder"
+	"github.com/multimfi/bot/pkg/alert"
+	"github.com/multimfi/bot/pkg/irc"
+	"github.com/multimfi/bot/pkg/responder"
 )
 
 var errChanClosed = errors.New("alertmanager: closed channel")

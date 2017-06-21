@@ -1,6 +1,6 @@
 package irctest
 
-import "bitbucket.org/multimfi/bot/pkg/irc"
+import "github.com/multimfi/bot/pkg/irc"
 
 type client struct {
 }
