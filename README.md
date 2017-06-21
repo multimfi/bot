@@ -4,7 +4,7 @@ Bot is a [alertmanager](https://github.com/prometheus/alertmanager) webhook.
 
 ###### Supported endpoints
 * IRC
-* WebHook
+* WebSocket
 * Telegram
 
 WebHook and Telegram endpoints can only receive alerts.
