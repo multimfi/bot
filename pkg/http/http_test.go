@@ -48,7 +48,12 @@ var testResolve = []byte(`
 }
 `)
 
-const alertHash = 2194928353
+var alertHash = [16]byte{
+	0x6d, 0x8f, 0x6d, 0xb0,
+	0x81, 0x1a, 0x36, 0x4c,
+	0x93, 0xd7, 0xe3, 0x35,
+	0x8f, 0x96, 0xff, 0xf0,
+}
 
 func newTestServer() (*Server, *httptest.Server) {
 	m := http.NewServeMux()
@@ -84,7 +89,7 @@ func TestAlertResolve(t *testing.T) {
 		t.Fatal("alert not received")
 	}
 	if a := p[0].Hash(); a != alertHash {
-		t.Fatalf("hash mismatch %d != %d", a, alertHash)
+		t.Fatalf("hash mismatch %x != %x", a, alertHash)
 	}
 
 	if ret, err := http.DefaultClient.Post(url, "", resolvBuf()); err != nil {

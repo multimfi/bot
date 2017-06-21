@@ -1,8 +1,8 @@
 package alert
 
 import (
+	"crypto/md5"
 	"fmt"
-	"hash/crc32"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -35,8 +35,8 @@ func (a *Alert) names() []string {
 	return ret
 }
 
-// Hash retuns a crc32 checksum from alert labels.
-func (a *Alert) Hash() uint32 {
+// Hash returns an md5 hash from alert labels.
+func (a *Alert) Hash() [16]byte {
 	b := getBuf()
 	defer putBuf(b)
 
@@ -45,7 +45,7 @@ func (a *Alert) Hash() uint32 {
 		b = append(b, a.Labels[k]...)
 	}
 
-	return crc32.ChecksumIEEE(b)
+	return md5.Sum(b)
 }
 
 func truncate(t time.Duration) time.Duration {

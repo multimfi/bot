@@ -28,17 +28,24 @@ type Server struct {
 	spool   *subpool
 	alertCh chan *alert.Alert
 	rg      ReceiverGroup
+	tg      *telegram
 }
 
 // NewServer registers and returns a new Server.
-func NewServer(irc irc.Client, srv *http.ServeMux, rg ReceiverGroup) *Server {
+func NewServer(irc irc.Client, srv *http.ServeMux, cfg *Config) *Server {
 	r := &Server{
 		irc:     irc,
 		pool:    alert.NewPool(),
 		rpool:   responder.NewPool(),
 		spool:   newPool(),
 		alertCh: make(chan *alert.Alert, 2),
-		rg:      rg,
+	}
+
+	if cfg != nil {
+		if cfg.Telegram.BotID != "" && cfg.Telegram.ChatID != "" {
+			r.tg = newTelegram(cfg.Telegram.BotID, cfg.Telegram.ChatID)
+		}
+		r.rg = cfg.Receivers
 	}
 
 	srv.HandleFunc("/alertmanager", r.alertManagerHandler)
@@ -110,9 +117,13 @@ func (s *Server) alert(a *alert.Alert) {
 		n.Ping(s.broadcastResponders)
 	}
 
+	// websocketpool broadcast
 	s.spool.broadcastAlert(ca)
 
-	if err = s.irc.NSendMsg("A " + m); err != nil {
+	msg := "A " + m
+	s.tg.broadcastTelegram(msg)
+
+	if err = s.irc.NSendMsg(msg); err != nil {
 		log.Printf("alert: error: %v", err)
 	}
 }
@@ -123,6 +134,7 @@ func (s *Server) resolve(a *alert.Alert) {
 	}
 
 	s.spool.broadcastAlert(a)
+	s.tg.broadcastTelegram("r " + a.String())
 
 	if err := s.irc.NSendMsg("r " + a.String()); err != nil {
 		log.Printf("resolve: error: %v", err)

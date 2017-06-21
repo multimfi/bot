@@ -133,7 +133,6 @@ window.onload = function () {
 		}
 
 		setState(alertItem, obj.status);
-		alertItem.id = obj.h;
 		for (name in labels) {
 			var item = getChild(name, alertItem);
 			if (!item) {

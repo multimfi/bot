@@ -8,13 +8,13 @@ import (
 // Pool stores alerts in a map by alert.Hash().
 type Pool struct {
 	alertsMu sync.RWMutex
-	alerts   map[uint32]*Alert
+	alerts   map[[16]byte]*Alert
 }
 
 // NewPool returns a new empty alert Pool.
 func NewPool() *Pool {
 	return &Pool{
-		alerts: make(map[uint32]*Alert),
+		alerts: make(map[[16]byte]*Alert),
 	}
 }
 

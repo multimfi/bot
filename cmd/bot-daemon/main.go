@@ -48,8 +48,8 @@ func version() string {
 	return fmt.Sprintf("build: %s, runtime: %s", buildversion, runtime.Version())
 }
 
-func config(file string) http.ReceiverGroup {
-	var r http.ReceiverGroup
+func config(file string) *http.Config {
+	r := new(http.Config)
 
 	f, err := ioutil.ReadFile(file)
 	if os.IsNotExist(err) {
@@ -61,7 +61,7 @@ func config(file string) http.ReceiverGroup {
 		log.Fatalf("config error: %v", err)
 	}
 
-	if err := json.Unmarshal(f, &r); err != nil {
+	if err := json.Unmarshal(f, r); err != nil {
 		log.Fatalf("config error: %v", err)
 	}
 

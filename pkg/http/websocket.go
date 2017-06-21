@@ -35,8 +35,8 @@ const (
 
 type wsAlert struct {
 	*alert.Alert
-	Hash    uint32 `json:"h"`
-	Current int32  `json:"c"`
+	Hash    [16]byte `json:"h"`
+	Current int32    `json:"c"`
 }
 
 // WSTyped is a typed json message.
