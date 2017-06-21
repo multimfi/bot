@@ -7,7 +7,7 @@ Bot is a [alertmanager](https://github.com/prometheus/alertmanager) webhook.
 * WebSocket
 * Telegram
 
-WebHook and Telegram endpoints can only receive alerts.
+WebSocket and Telegram endpoints can only receive alerts.
 
 ###### Receiver groups
 
