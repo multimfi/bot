@@ -16,13 +16,6 @@ var (
 	ErrDone = errors.New("irc: quit")
 )
 
-// DialError is returned when Dial fails connecting to server.
-type DialError string
-
-func (d DialError) Error() string {
-	return "irc: dial: " + string(d)
-}
-
 // HandlerError is returned when a message handler fails a non-blocking send.
 type HandlerError struct {
 	msg string
@@ -136,7 +129,7 @@ func (c *ircClient) Dial() error {
 
 	ic, err := irc.Dial(c.server)
 	if err != nil {
-		return DialError(err.Error())
+		return err
 	}
 	c.conn = ic
 
@@ -201,6 +194,7 @@ func (c *ircClient) setready() {
 	case <-c.ready:
 		break
 	default:
+		log.Println("irc: ready")
 		close(c.ready)
 	}
 }
@@ -288,6 +282,11 @@ func (c *ircClient) listen() error {
 
 			if err := c.msgHandler(m); err != nil {
 				log.Println(err)
+			}
+		default:
+			b := m.Command[0]
+			if b == '4' || b == '5' {
+				log.Printf("irc: error: %q", m)
 			}
 		}
 	}

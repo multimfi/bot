@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
+	"net"
 	"net/http"
 	"time"
 
@@ -231,8 +232,8 @@ func (s *Server) Dial() error {
 		}
 
 		switch err.(type) {
-		case irc.DialError:
-			if d < time.Minute {
+		case *net.OpError:
+			if d < time.Minute*2 {
 				d *= 2
 			}
 		default:
@@ -243,7 +244,7 @@ func (s *Server) Dial() error {
 			s.broadcastIRC()
 		}
 
-		log.Printf("server: error %[1]q, %[1]T, reconnecting in %[2]s", err, d)
+		log.Printf("irc: error %q, reconnecting in %s", err, d)
 		time.Sleep(d)
 	}
 }
