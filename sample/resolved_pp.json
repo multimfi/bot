@@ -13,6 +13,34 @@
 			},
 			"startsAt": "2017-05-26T18:30:00.000+03:00",
 			"status": "resolved"
+		},
+		{
+			"annotations": {
+				"summary": "summarytext"
+			},
+			"endsAt": "2017-05-26T18:32:07.805+03:00",
+			"generatorURL": "http://generator:9090/graph?g0.expr=up+%3D%3D+0\u0026g0.tab=0",
+			"labels": {
+				"alertname": "all_service_down",
+				"instance": "127.0.0.1:9101",
+				"job": "test"
+			},
+			"startsAt": "2017-05-26T18:30:00.001+03:00",
+			"status": "resolved"
+		},
+		{
+			"annotations": {
+				"summary": "summarytext"
+			},
+			"endsAt": "2017-05-26T18:33:07.805+03:00",
+			"generatorURL": "http://generator:9090/graph?g0.expr=up+%3D%3D+0\u0026g0.tab=0",
+			"labels": {
+				"alertname": "all_service_down",
+				"instance": "127.0.0.1:9102",
+				"job": "test"
+			},
+			"startsAt": "2017-05-26T18:30:00.002+03:00",
+			"status": "resolved"
 		}
 	],
 	"commonAnnotations": {

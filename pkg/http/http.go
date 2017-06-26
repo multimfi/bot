@@ -194,7 +194,8 @@ func (s *Server) alertManagerHandler(w http.ResponseWriter, r *http.Request) {
 
 	for _, v := range d.Alerts {
 		v.Responders = s.rGet(d.Receiver)
-		s.alertCh <- &v
+		p := v
+		s.alertCh <- &p
 	}
 }
 
