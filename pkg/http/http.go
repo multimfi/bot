@@ -125,8 +125,8 @@ func (s *Server) alert(a *alert.Alert) {
 	}
 
 	if n != nil {
-		ca.SetCurrent(i)
 		ok = ok || ca.Current() != i
+		ca.SetCurrent(i)
 	}
 	if !ok {
 		return

@@ -56,7 +56,7 @@
 	"groupLabels": {
 		"alertname": "all_service_down"
 	},
-	"receiver": "group3",
+	"receiver": "group1",
 	"status": "resolved",
 	"version": "4"
 }
