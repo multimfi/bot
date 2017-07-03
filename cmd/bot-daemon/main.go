@@ -40,26 +40,22 @@ func config(file, tfile string) *http.Config {
 	f, err := ioutil.ReadFile(file)
 	if os.IsNotExist(err) {
 		log.Printf("config error: %v", err)
-		return nil
-	}
-
-	if err != nil {
+	} else if err != nil {
 		log.Fatalf("config error: %v", err)
-	}
-
-	if err := json.Unmarshal(f, r); err != nil {
-		log.Fatalf("config error: %v", err)
+	} else {
+		if err := json.Unmarshal(f, r); err != nil {
+			log.Fatalf("config json error: %v", err)
+		}
 	}
 
 	f, err = ioutil.ReadFile(tfile)
 	if os.IsNotExist(err) {
-		log.Printf("config error: %v", err)
+		log.Printf("config template error: %v", err)
 		return r
 	}
 	if err != nil {
-		log.Fatalf("config error: %v", err)
+		log.Fatalf("config template error: %v", err)
 	}
-
 	r.Template = string(f)
 	return r
 }
