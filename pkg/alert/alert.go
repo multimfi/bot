@@ -2,7 +2,6 @@ package alert
 
 import (
 	"crypto/md5"
-	"fmt"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -25,11 +24,12 @@ func putBuf(b []byte) {
 }
 
 func (a *Alert) names() []string {
-	var ret []string
+	ret := make([]string, 0, len(a.Labels))
 
 	for k := range a.Labels {
 		ret = append(ret, k)
 	}
+
 	sort.Strings(ret)
 
 	return ret
@@ -52,52 +52,30 @@ func truncate(t time.Duration) time.Duration {
 	return t - t%time.Second
 }
 
-func (a *Alert) since() time.Duration {
-	return time.Now().UTC().Sub(a.StartsAt)
+func (a *Alert) Since() time.Duration {
+	return truncate(time.Now().UTC().Sub(a.StartsAt))
 }
 
-func (a *Alert) lasted() time.Duration {
-	return a.EndsAt.Sub(a.StartsAt)
+func (a *Alert) Lasted() time.Duration {
+	return truncate(a.EndsAt.Sub(a.StartsAt))
 }
 
 // SetCurrent sets the current expected responder for alert to i atomically.
-func (a *Alert) SetCurrent(i int32) {
-	atomic.StoreInt32(&a.current, i)
+func (a *Alert) SetCurrent(i int) {
+	atomic.StoreInt32(&a.current, int32(i))
 }
 
 // Current returns the current expected responder for alert atomically.
-func (a *Alert) Current() int32 {
-	return atomic.LoadInt32(&a.current)
+func (a *Alert) Current() int {
+	return int(atomic.LoadInt32(&a.current))
 }
 
-func kdv(m map[string]string, k, v string) string {
-	if r, ok := m[k]; ok {
-		return r
-	}
-	return v
+// AllFail returns true when SetAllFail has been called.
+func (a *Alert) AllFail() bool {
+	return atomic.LoadInt32(&a.allfail) == 1
 }
 
-// String returns a consise summary for alert.
-func (a *Alert) String() string {
-	switch a.Status {
-	case AlertFiring:
-		return fmt.Sprintf(
-			"%s: %s, %s: %s (since %s)",
-			kdv(a.Labels, "instance", "none"),
-			kdv(a.Labels, "job", "none"),
-			kdv(a.Labels, "alertname", "unnamed"),
-			kdv(a.Annotations, "summary", "none"),
-			truncate(a.since()),
-		)
-	case AlertResolved:
-		return fmt.Sprintf(
-			"%s: %s, %s: %s (lasted %s)",
-			kdv(a.Labels, "instance", "none"),
-			kdv(a.Labels, "job", "none"),
-			kdv(a.Labels, "alertname", "unnamed"),
-			kdv(a.Annotations, "summary", "none"),
-			truncate(a.lasted()),
-		)
-	}
-	return "error: unknown status: " + a.Status
+// SetAllFails sets status to allfailed.
+func (a *Alert) SetAllFail() {
+	atomic.StoreInt32(&a.allfail, 1)
 }

@@ -1,14 +1,16 @@
 package http
 
 import (
+	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"log"
 	"net"
 	"net/http"
+	"strings"
+	"text/template"
 	"time"
 
 	"github.com/multimfi/bot/pkg/alert"
@@ -16,37 +18,69 @@ import (
 	"github.com/multimfi/bot/pkg/responder"
 )
 
-var errChanClosed = errors.New("alertmanager: closed channel")
-
 // ReceiverGroup is a mapped group of receivers, nil is considered an empty group.
 type ReceiverGroup map[string][]string
 
 // Server tracks alerts received from prometheus alertmanager.
 type Server struct {
-	irc     irc.Client
-	pool    *alert.Pool
-	rpool   *responder.Pool
-	spool   *subpool
-	alertCh chan *alert.Alert
-	rg      ReceiverGroup
-	tg      *telegram
+	irc   irc.Client
+	pool  *alert.Pool
+	rpool *responder.Pool
+	spool *subpool
+	rg    ReceiverGroup
+	tg    *telegram
+	tmpl  *template.Template
+}
+
+// TData is passed to template.
+type TData struct {
+	A *alert.Alert
+	R *responder.Responder
+	H bool
+}
+
+// NewTData returns a new TData for template.
+// tdata.H is set to false when alert has no configured responders.
+// If responder r is nil tdata.R is a empty responder.
+func NewTData(a *alert.Alert, r *responder.Responder) (tdata TData) {
+	if r == nil {
+		r = &responder.Responder{}
+	}
+	return TData{
+		A: a,
+		R: r,
+		H: len(a.Responders) != 0,
+	}
 }
 
 // NewServer registers and returns a new Server.
 func NewServer(irc irc.Client, srv *http.ServeMux, cfg *Config) *Server {
 	r := &Server{
-		irc:     irc,
-		pool:    alert.NewPool(),
-		rpool:   responder.NewPool(),
-		spool:   newPool(),
-		alertCh: make(chan *alert.Alert, 2),
+		irc:   irc,
+		pool:  alert.NewPool(),
+		rpool: responder.NewPool(),
+		spool: newPool(),
 	}
 
+	var err error
+	t := DefaultTemplate
+
 	if cfg != nil {
+		if cfg.Template != "" {
+			t = cfg.Template
+		}
+
 		if cfg.Telegram.BotID != "" && cfg.Telegram.ChatID != "" {
 			r.tg = newTelegram(cfg.Telegram.BotID, cfg.Telegram.ChatID)
 		}
 		r.rg = cfg.Receivers
+	}
+
+	r.tmpl, err = template.New("").Parse(
+		strings.Replace(t, "\n", " ", -1),
+	)
+	if err != nil {
+		log.Fatalf("http: template error: %v", err)
 	}
 
 	srv.HandleFunc("/alertmanager", r.alertManagerHandler)
@@ -79,41 +113,24 @@ func (s *Server) clear(m string) string {
 }
 
 func (s *Server) alert(a *alert.Alert) {
-	var (
-		ca *alert.Alert
-		m  string
-		ok bool
-	)
+	ok, ca := s.pool.Add(a)
+	if ca.AllFail() {
+		return
+	}
 
-	ok, ca = s.pool.Add(a)
-	oi := ca.Current()
-
-	r := ca.Responders
-
-	n, i, err := s.rpool.Get(r)
+	n, i, err := s.rpool.Get(ca.Responders)
 	if err != nil {
+		ca.SetAllFail()
 		log.Printf("alert: error: %v", err)
 	}
 
 	if n != nil {
-		ca.SetCurrent(int32(i))
-		ok = ok || oi != int32(i)
-
-		if n.Active() {
-			m = ca.String()
-		} else {
-			m = fmt.Sprintf("%s - %s", ca, n.Name)
-		}
-	} else if len(r) < 1 {
-		m = ca.String()
-	} else {
-		m = fmt.Sprintf("%s - %s", ca, ca.Responders)
+		ca.SetCurrent(i)
+		ok = ok || ca.Current() != i
 	}
-
 	if !ok {
 		return
 	}
-
 	if n != nil {
 		n.Ping(s.broadcastResponders)
 	}
@@ -121,9 +138,21 @@ func (s *Server) alert(a *alert.Alert) {
 	// websocketpool broadcast
 	s.spool.broadcastAlert(ca)
 
-	msg := "A " + m
+	buf := new(bytes.Buffer)
+	var msg string
+
+	if err := s.tmpl.Execute(buf, NewTData(ca, n)); err != nil {
+		log.Printf("alert: template error: %v", err)
+		msg = "error: " + err.Error()
+	} else {
+		msg = buf.String()
+	}
+
 	s.tg.broadcastTelegram(msg)
 
+	if !s.irc.IsReady() {
+		return
+	}
 	if err = s.irc.NSendMsg(msg); err != nil {
 		log.Printf("alert: error: %v", err)
 	}
@@ -133,28 +162,31 @@ func (s *Server) resolve(a *alert.Alert) {
 	if !s.pool.Remove(a) {
 		return
 	}
-
 	s.spool.broadcastAlert(a)
-	s.tg.broadcastTelegram("r " + a.String())
 
-	if err := s.irc.NSendMsg("r " + a.String()); err != nil {
+	n, _, err := s.rpool.Get(a.Responders)
+	if err != nil {
+		log.Printf("alert: error: %v", err)
+	}
+
+	buf := new(bytes.Buffer)
+	var msg string
+
+	if err := s.tmpl.Execute(buf, NewTData(a, n)); err != nil {
+		log.Printf("resolve: template error: %v", err)
+		msg = "error: " + err.Error()
+	} else {
+		msg = buf.String()
+	}
+
+	s.tg.broadcastTelegram(msg)
+
+	if !s.irc.IsReady() {
+		return
+	}
+	if err := s.irc.NSendMsg(msg); err != nil {
 		log.Printf("resolve: error: %v", err)
 	}
-}
-
-// AlertManager consumes alerts from alertCh.
-func (s *Server) AlertManager() error {
-	for a := range s.alertCh {
-		switch a.Status {
-		case alert.AlertFiring:
-			s.alert(a)
-		case alert.AlertResolved:
-			s.resolve(a)
-		default:
-			log.Printf("alertmanager: invalid alert: %v", a)
-		}
-	}
-	return errChanClosed
 }
 
 func unmarshal(data io.Reader) (*alert.Data, error) {
@@ -195,7 +227,15 @@ func (s *Server) alertManagerHandler(w http.ResponseWriter, r *http.Request) {
 	for _, v := range d.Alerts {
 		v.Responders = s.rGet(d.Receiver)
 		p := v
-		s.alertCh <- &p
+
+		switch v.Status {
+		case alert.AlertFiring:
+			s.alert(&p)
+		case alert.AlertResolved:
+			s.resolve(&p)
+		default:
+			log.Printf("alertmanager: invalid state: %s", v.Status)
+		}
 	}
 }
 

@@ -106,7 +106,6 @@ func newTestServer() (*Server, *httptest.Server) {
 
 	ret := NewServer(i, m, nil)
 	go ret.Dial()
-	go ret.AlertManager()
 
 	return ret, h
 }
@@ -133,6 +132,7 @@ func TestAlertResolve(t *testing.T) {
 	t.Parallel()
 	srv, hts := newTestServer()
 	url := hts.URL + "/alertmanager"
+	defer hts.Close()
 
 	if ret, err := http.DefaultClient.Post(url, "", alertBuf()); err != nil {
 		t.Fatal("alert POST error", err, ret.Status)
@@ -151,4 +151,20 @@ func TestAlertResolve(t *testing.T) {
 	}
 
 	wait(t, "alert not resolved", func() bool { return len(srv.pool.List()) == 0 })
+}
+
+func BenchmarkAlert(b *testing.B) {
+	srv, hts := newTestServer()
+	hts.Close()
+
+	adata, err := unmarshal(alertBuf())
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		srv.alert(&adata.Alerts[0])
+	}
 }

@@ -1,5 +1,4 @@
 REL = r0
-VERSION =
 GIT_REVLIST = $(shell test -d .git && git rev-list --count HEAD)
 GIT_DESCRIBE = $(shell test -d .git && git describe --always)
 GIT_REF = $(shell test -d .git && git rev-parse --abbrev-ref HEAD)
@@ -8,10 +7,16 @@ ifneq "$(GIT_DESCRIBE)" ""
 REL = r$(GIT_REVLIST).$(GIT_DESCRIBE)
 endif
 
+ifndef VERSION
 ifneq "$(GIT_REF)" "master"
 VERSION = $(REL)-$(GIT_REF)
 else
 VERSION = $(REL)
+endif
+endif
+
+ifndef BUILDFLAGS
+BUILDFLAGS = -i -v
 endif
 
 default: bot-daemon
@@ -19,10 +24,10 @@ default: bot-daemon
 all: test bot-daemon bot-client
 
 bot-daemon:
-	CGO_ENABLED=0 go build -i -ldflags "-X main.buildversion=$(VERSION)" -v github.com/multimfi/bot/cmd/bot-daemon
+	go build -ldflags "-X main.buildversion=$(VERSION)" $(BUILDFLAGS) github.com/multimfi/bot/cmd/bot-daemon
 
 bot-client:
-	CGO_ENABLED=0 go build -i -ldflags "-X main.buildversion=$(VERSION)" -v github.com/multimfi/bot/cmd/bot-client
+	go build -ldflags "-X main.buildversion=$(VERSION)" $(BUILDFLAGS) github.com/multimfi/bot/cmd/bot-client
 
 install: bot-client
 	install bot-client $(HOME)/.local/bin/bot-client

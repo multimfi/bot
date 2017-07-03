@@ -6,4 +6,5 @@ type Config struct {
 		BotID  string `json:"botid"`
 		ChatID string `json:"chatid"`
 	} `json:"telegram"`
+	Template string `json:"-"`
 }

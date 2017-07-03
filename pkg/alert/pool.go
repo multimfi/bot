@@ -54,9 +54,9 @@ func (p *Pool) List() []*Alert {
 // the current alert is returned.
 // Returned bool indicates successful addition.
 func (p *Pool) Add(a *Alert) (bool, *Alert) {
-	p.alertsMu.Lock()
-
 	h := a.Hash()
+
+	p.alertsMu.Lock()
 	if c, exists := p.alerts[h]; exists {
 		p.alertsMu.Unlock()
 		return !exists, c

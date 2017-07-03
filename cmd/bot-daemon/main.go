@@ -21,16 +21,6 @@ import (
 
 var buildversion = "devel"
 
-var (
-	flagConfig      = flag.String("cfg", "bot.json", "bot configuration file")
-	flagIRCServer   = flag.String("irc.server", "127.0.0.1:6667", "irc server address")
-	flagIRCChannel  = flag.String("irc.channel", "#test", "irc channel to join")
-	flagIRCUsername = flag.String("irc.user", "Bot", "irc username")
-	flagIRCNickname = flag.String("irc.nick", "bot", "irc nickname")
-	flagAMListen    = flag.String("alertmanager.addr", "127.0.0.1:9500", "alertmanager webhook listen address")
-	flagVersion     = flag.Bool("version", false, "version")
-)
-
 type errFunc func() error
 
 func fatal(fs ...errFunc) {
@@ -44,11 +34,7 @@ func fatal(fs ...errFunc) {
 	}
 }
 
-func version() string {
-	return fmt.Sprintf("build: %s, runtime: %s", buildversion, runtime.Version())
-}
-
-func config(file string) *http.Config {
+func config(file, tfile string) *http.Config {
 	r := new(http.Config)
 
 	f, err := ioutil.ReadFile(file)
@@ -65,8 +51,33 @@ func config(file string) *http.Config {
 		log.Fatalf("config error: %v", err)
 	}
 
+	f, err = ioutil.ReadFile(tfile)
+	if os.IsNotExist(err) {
+		log.Printf("config error: %v", err)
+		return r
+	}
+	if err != nil {
+		log.Fatalf("config error: %v", err)
+	}
+
+	r.Template = string(f)
 	return r
 }
+
+func version() string {
+	return fmt.Sprintf("build: %s, runtime: %s", buildversion, runtime.Version())
+}
+
+var (
+	flagConfig      = flag.String("cfg", "bot.json", "bot configuration file")
+	flagTemplate    = flag.String("cfg.template", "template.tmpl", "template file")
+	flagIRCServer   = flag.String("irc.server", "127.0.0.1:6667", "irc server address")
+	flagIRCChannel  = flag.String("irc.channel", "#test", "irc channel to join")
+	flagIRCUsername = flag.String("irc.user", "Bot", "irc username")
+	flagIRCNickname = flag.String("irc.nick", "bot", "irc nickname")
+	flagAMListen    = flag.String("alertmanager.addr", "127.0.0.1:9500", "alertmanager webhook listen address")
+	flagVersion     = flag.Bool("version", false, "version")
+)
 
 func main() {
 	log.SetFlags(log.Lshortfile)
@@ -98,10 +109,9 @@ func main() {
 		return "pong"
 	})
 
-	srv := http.NewServer(ic, mux, config(*flagConfig))
+	srv := http.NewServer(ic, mux, config(*flagConfig, *flagTemplate))
 
 	fatal(
-		srv.AlertManager,
 		srv.Dial,
 		hs.ListenAndServe,
 	)

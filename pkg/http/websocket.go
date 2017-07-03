@@ -36,7 +36,7 @@ const (
 type wsAlert struct {
 	*alert.Alert
 	Hash    [16]byte `json:"h"`
-	Current int32    `json:"c"`
+	Current int      `json:"c"`
 }
 
 // WSTyped is a typed json message.
@@ -108,7 +108,7 @@ func (s *Server) responderState() ([]byte, error) {
 
 // subpool is a pool of websocket subscriptions.
 type subpool struct {
-	mu  sync.RWMutex // guards id and m
+	mu  sync.RWMutex // guards id and seq
 	seq uint64
 	m   map[uint64]*client
 }

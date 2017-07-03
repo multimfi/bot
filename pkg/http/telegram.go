@@ -61,7 +61,6 @@ func (t *telegram) sender() {
 
 	log.Println("telegram: sender: channel closed")
 	close(t.done)
-	close(t.msg)
 }
 
 func (t *telegram) broadcastTelegram(a string) {

@@ -55,6 +55,8 @@ W5 | user2
     	alertmanager webhook listen address (default "127.0.0.1:9500")
   -cfg string
     	bot configuration file (default "bot.json")
+  -cfg.template string
+        template file (default "template.tmpl")
   -irc.channel string
     	irc channel to join (default "#test")
   -irc.nick string

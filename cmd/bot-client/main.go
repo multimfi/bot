@@ -1,13 +1,17 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"net"
 	"os"
 	"runtime"
+	"strings"
+	"text/template"
 	"time"
 
 	"github.com/multimfi/bot/pkg/alert"
@@ -20,8 +24,9 @@ import (
 var buildversion = "devel"
 
 type client struct {
-	dbus *dbus.Conn
-	ws   *websocket.Conn
+	dbus     *dbus.Conn
+	ws       *websocket.Conn
+	template *template.Template
 }
 
 func (c *client) notify(title string, message string, urgency byte, timeout int32) {
@@ -45,16 +50,26 @@ func (c *client) notify(title string, message string, urgency byte, timeout int3
 }
 
 func (c *client) handleAlert(d []byte) error {
-	var a alert.Alert
-	if err := json.Unmarshal(d, &a); err != nil {
+	a := new(alert.Alert)
+	if err := json.Unmarshal(d, a); err != nil {
 		return err
+	}
+
+	buf := new(bytes.Buffer)
+	var msg string
+
+	err := c.template.Execute(buf, http.NewTData(a, nil))
+	if err != nil {
+		msg = "error: " + err.Error()
+	} else {
+		msg = buf.String()
 	}
 
 	switch a.Status {
 	case alert.AlertFiring:
-		c.notify(a.Status, a.String(), 2, 0)
+		c.notify(a.Status, msg, 2, 0)
 	case alert.AlertResolved:
-		c.notify(a.Status, a.String(), 0, 15000)
+		c.notify(a.Status, msg, 0, 15000)
 	}
 
 	return nil
@@ -79,7 +94,30 @@ func (c *client) msgHandler(d []byte) error {
 	return err
 }
 
-func newClient(addr string) (*client, error) {
+func loadTemplate(file string) *template.Template {
+	var t string
+
+	f, err := ioutil.ReadFile(file)
+	if err == nil {
+		t = string(f)
+	} else if os.IsNotExist(err) {
+		t = http.DefaultTemplate
+		log.Printf("template: load error: %v", err)
+	} else {
+		log.Fatalf("template: load error: %v", err)
+	}
+
+	ret, err := template.New("").Parse(
+		strings.Replace(t, "\n", " ", -1),
+	)
+	if err != nil {
+		log.Fatalf("template: parse error: %v", err)
+	}
+
+	return ret
+}
+
+func newClient(addr, tmpl string) (*client, error) {
 	dc, err := dbus.SessionBus()
 	if err != nil {
 		return nil, err
@@ -92,19 +130,21 @@ func newClient(addr string) (*client, error) {
 	}
 
 	return &client{
-		dbus: dc,
-		ws:   wc,
+		dbus:     dc,
+		ws:       wc,
+		template: loadTemplate(tmpl),
 	}, nil
 }
-
-var (
-	flagAddress = flag.String("ws.addr", "ws://127.0.0.1:9500/ws", "websocket address")
-	flagVersion = flag.Bool("version", false, "print version")
-)
 
 func version() string {
 	return fmt.Sprintf("build: %s, runtime: %s", buildversion, runtime.Version())
 }
+
+var (
+	flagAddress  = flag.String("ws.addr", "ws://127.0.0.1:9500/ws", "websocket address")
+	flagVersion  = flag.Bool("version", false, "print version")
+	flagTemplate = flag.String("template", "template.tmpl", "template file")
+)
 
 func main() {
 	log.SetFlags(log.Lshortfile)
@@ -115,7 +155,7 @@ func main() {
 		os.Exit(0)
 	}
 
-	c, err := newClient(*flagAddress)
+	c, err := newClient(*flagAddress, *flagTemplate)
 	if err != nil {
 		log.Fatal(err)
 	}
