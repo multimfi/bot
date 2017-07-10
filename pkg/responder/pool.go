@@ -54,7 +54,7 @@ func (p *Pool) List() []*Responder {
 
 func get(w, l int) int {
 	if w < 1 {
-		return 1
+		return 0
 	}
 
 	if w <= l {
