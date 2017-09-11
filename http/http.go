@@ -85,7 +85,6 @@ func NewServer(irc irc.Client, srv *http.ServeMux, cfg *Config) *Server {
 
 	srv.HandleFunc("/alertmanager", r.alertManagerHandler)
 	srv.HandleFunc("/ws", r.wsHandler)
-	srv.HandleFunc("/p", r.pollHandler)
 	srv.HandleFunc("/", r.statusPageHandler)
 
 	irc.Handle("!clear", r.clear)

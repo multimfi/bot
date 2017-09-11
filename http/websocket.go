@@ -2,6 +2,7 @@ package http
 
 import (
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"sync"
@@ -11,6 +12,8 @@ import (
 
 	"github.com/gorilla/websocket"
 )
+
+var errMaxClients = errors.New("subpool: allocate error: maxclients")
 
 // Constants related to websocket communication.
 const (
@@ -106,67 +109,108 @@ func (s *Server) responderState() ([]byte, error) {
 	return json.Marshal(r)
 }
 
+const (
+	clientMax     = 256
+	clientBufSize = 4
+	poolBufSize   = 32
+)
+
 // subpool is a pool of websocket subscriptions.
 type subpool struct {
-	mu  sync.RWMutex // guards id and seq
-	seq uint64
-	m   map[uint64]*client
-}
-
-type client struct {
-	id uint64
 	ch chan []byte
+
+	mu  sync.Mutex
+	seq uint32
+	cc  [clientMax]chan []byte
 }
 
 func newPool() *subpool {
-	return &subpool{
-		m: make(map[uint64]*client),
+	r := &subpool{
+		ch: make(chan []byte, poolBufSize),
 	}
+	go func() {
+		for {
+			a, ok := <-r.ch
+			if !ok {
+				return
+			}
+
+			r.mu.Lock()
+			for n, c := range r.cc {
+				if c == nil {
+					continue
+				}
+
+				select {
+				case c <- a:
+					continue
+				default:
+				}
+
+				log.Printf("subpool: client %d, channel full", n)
+			}
+			r.mu.Unlock()
+		}
+	}()
+	return r
 }
 
-func (s *subpool) unsubscribe(c *client) {
-	s.mu.Lock()
-	if _, exists := s.m[c.id]; exists {
-		close(c.ch)
-		delete(s.m, c.id)
+func get(w, l uint32) uint32 {
+	if w <= l {
+		return w - 1
 	}
-	s.mu.Unlock()
+
+	w = w % l
+	if w < 1 {
+		w = l
+	}
+	return w - 1
 }
 
-// subscribe returns a client with an unique id.
-// uniqueness is guaranteed by always incrementing subpool sequence number.
-func (s *subpool) subscribe() *client {
+func (s *subpool) allocate() (chan []byte, uint32, error) {
 	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	s.seq++
+	n := get(s.seq, clientMax)
 
-	c := &client{
-		id: s.seq,
-		ch: make(chan []byte, 4),
+	if s.cc[n] == nil {
+		s.cc[n] = make(chan []byte, clientBufSize)
+		return s.cc[n], n, nil
 	}
-	s.m[c.id] = c
 
+	for i, c := range s.cc {
+		if c != nil {
+			continue
+		}
+		s.cc[i] = make(chan []byte, clientBufSize)
+		return s.cc[i], uint32(i), nil
+	}
+
+	return nil, 0, errMaxClients
+}
+
+func (s *subpool) free(n uint32, ch chan []byte) {
+	s.mu.Lock()
+	s.cc[n] = nil
 	s.mu.Unlock()
-	return c
+	close(ch)
 }
 
 // broadcast does a non-blocking send to all subscribed clients.
 // does not guarantee that clients receive sent bytes.
 func (s *subpool) broadcast(b []byte) {
-	s.mu.RLock()
-	for k, v := range s.m {
-		select {
-		case v.ch <- b:
-		default:
-			log.Printf("websocket: broadcast: %d failed", k)
-		}
+	select {
+	case s.ch <- b:
+	default:
+		log.Println("websocket: broadcast: channel full")
 	}
-	s.mu.RUnlock()
 }
 
 func (s *subpool) broadcastAlert(a *alert.Alert) {
 	b, err := wsAlertMsg(a)
 	if err != nil {
-		log.Printf("websocket: alertjson error: %v", err)
+		log.Printf("broadcast: alert: error: %v", err)
 		return
 	}
 	s.broadcast(b)
@@ -175,7 +219,7 @@ func (s *subpool) broadcastAlert(a *alert.Alert) {
 func (s *Server) broadcastIRC() {
 	b, err := s.ircState()
 	if err != nil {
-		log.Printf("websocket: ircjson error: %v", err)
+		log.Printf("broadcast: irc: error: %v", err)
 		return
 	}
 	s.spool.broadcast(b)
@@ -184,7 +228,7 @@ func (s *Server) broadcastIRC() {
 func (s *Server) broadcastResponders() {
 	b, err := s.responderState()
 	if err != nil {
-		log.Printf("websocket: ircjson error: %v", err)
+		log.Printf("broadcast: responders: error: %v", err)
 		return
 	}
 	if b != nil {
@@ -192,26 +236,26 @@ func (s *Server) broadcastResponders() {
 	}
 }
 
-func wsWriter(ac *client, ws *websocket.Conn) {
+func wsWriter(c <-chan []byte, ws *websocket.Conn) {
 	pt := time.NewTicker(PingPeriod)
 	defer pt.Stop()
 
 	for {
 		select {
-		case a, ok := <-ac.ch:
+		case b, ok := <-c:
 			ws.SetWriteDeadline(time.Now().Add(WriteWait))
 			if !ok {
 				ws.WriteMessage(websocket.CloseMessage, []byte{})
 				return
 			}
-
-			if err := ws.WriteMessage(websocket.TextMessage, a); err != nil {
+			if err := ws.WriteMessage(websocket.TextMessage, b); err != nil {
+				log.Printf("websocket: client error: %v", err)
 				return
 			}
-
 		case <-pt.C:
 			ws.SetWriteDeadline(time.Now().Add(WriteWait))
 			if err := ws.WriteMessage(websocket.PingMessage, []byte{}); err != nil {
+				log.Printf("websocket: client error: %v", err)
 				return
 			}
 		}
@@ -224,6 +268,13 @@ var upgrader = websocket.Upgrader{
 }
 
 func (s *Server) wsHandler(w http.ResponseWriter, r *http.Request) {
+	ch, n, err := s.spool.allocate()
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	defer s.spool.free(n, ch)
+
 	ws, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		if _, ok := err.(websocket.HandshakeError); !ok {
@@ -237,10 +288,7 @@ func (s *Server) wsHandler(w http.ResponseWriter, r *http.Request) {
 	ws.SetReadLimit(1)
 	ws.SetReadDeadline(time.Now().Add(PongWait))
 	ws.SetPongHandler(func(string) error { ws.SetReadDeadline(time.Now().Add(PongWait)); return nil })
-
-	ac := s.spool.subscribe()
-	go wsWriter(ac, ws)
-	defer s.spool.unsubscribe(ac)
+	go wsWriter(ch, ws)
 
 	for {
 		_, msg, err := ws.ReadMessage()
@@ -257,59 +305,32 @@ func (s *Server) wsHandler(w http.ResponseWriter, r *http.Request) {
 		if (m & EventIRC) != 0 {
 			r, err := s.ircState()
 			if err != nil {
-				log.Printf("websocket: reader error %v", err)
+				log.Printf("reader error %v", err)
 				break
 			}
-			ac.ch <- r
+			ch <- r
 		}
 
 		if (m & EventAlert) != 0 {
 			for _, v := range s.pool.List() {
 				r, err := wsAlertMsg(v)
 				if err != nil {
-					log.Printf("websocket: reader error %v", err)
+					log.Printf("reader error %v", err)
 					break
 				}
-				ac.ch <- r
+				ch <- r
 			}
 		}
 
 		if (m & EventResponder) != 0 {
 			r, err := s.responderState()
 			if err != nil {
-				log.Printf("websocket: reader error %v", err)
+				log.Printf("reader error %v", err)
 				break
 			}
 			if r != nil {
-				ac.ch <- r
+				ch <- r
 			}
-		}
-	}
-}
-
-// pollHandler can be used as a simple "longpoll".
-// TODO: bundled events, resumed poll.
-func (s *Server) pollHandler(w http.ResponseWriter, r *http.Request) {
-	ac := s.spool.subscribe()
-	defer s.spool.unsubscribe(ac)
-
-	var cc <-chan bool
-	if c, ok := w.(http.CloseNotifier); ok {
-		cc = c.CloseNotify()
-	}
-
-	w.(http.Flusher).Flush()
-
-	for {
-		select {
-		case <-cc:
-			return
-		case a, ok := <-ac.ch:
-			if !ok {
-				return
-			}
-			w.Write(a)
-			return
 		}
 	}
 }
