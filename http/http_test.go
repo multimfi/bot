@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/multimfi/bot/pkg/irc/irctest"
+	"github.com/multimfi/bot/irc/irctest"
 )
 
 var testAlert = []byte(`

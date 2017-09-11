@@ -14,8 +14,8 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/multimfi/bot/pkg/alert"
-	"github.com/multimfi/bot/pkg/http"
+	"github.com/multimfi/bot/alert"
+	"github.com/multimfi/bot/http"
 
 	"github.com/godbus/dbus"
 	"github.com/gorilla/websocket"

@@ -1,6 +1,6 @@
 package irctest
 
-import "github.com/multimfi/bot/pkg/irc"
+import "github.com/multimfi/bot/irc"
 
 type client struct {
 }

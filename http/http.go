@@ -13,9 +13,9 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/multimfi/bot/pkg/alert"
-	"github.com/multimfi/bot/pkg/irc"
-	"github.com/multimfi/bot/pkg/responder"
+	"github.com/multimfi/bot/alert"
+	"github.com/multimfi/bot/irc"
+	"github.com/multimfi/bot/responder"
 )
 
 // ReceiverGroup is a mapped group of receivers, nil is considered an empty group.

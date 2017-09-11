@@ -15,8 +15,8 @@ import (
 
 	stdhttp "net/http"
 
-	"github.com/multimfi/bot/pkg/http"
-	"github.com/multimfi/bot/pkg/irc"
+	"github.com/multimfi/bot/http"
+	"github.com/multimfi/bot/irc"
 )
 
 var buildversion = "devel"

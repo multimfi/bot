@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/multimfi/bot/pkg/alert"
+	"github.com/multimfi/bot/alert"
 
 	"github.com/gorilla/websocket"
 )
