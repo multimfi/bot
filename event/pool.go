@@ -66,22 +66,37 @@ func (e *Pool) Unlock() {
 	e.mu.Unlock()
 }
 
-func (e *Pool) Next(cur uint32) uint32 {
+func (e *Pool) Broadcast() {
+	e.cond.Broadcast()
+}
+
+func (e *Pool) Next(cur uint32, cc <-chan struct{}) (uint32, bool) {
 	e.mu.Lock()
 	ret := e.gen
+	ok := true
 	if cur != ret {
 		e.mu.Unlock()
-		return ret
+		return ret, ok
 	}
+
+loop:
 	for {
 		e.cond.Wait()
+		select {
+		case <-cc:
+			ok = false
+			break loop
+		default:
+		}
+
 		ret = e.gen
 		if ret != cur {
 			break
 		}
 	}
+
 	e.mu.Unlock()
-	return ret
+	return ret, ok
 }
 
 func (e *Pool) String(w io.Writer) {

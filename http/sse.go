@@ -175,10 +175,10 @@ func (s *Server) ssehandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/event-stream")
-
 	var (
 		last, gen uint32
 		err       error
+		ok        bool
 	)
 
 	last, err = s.current(w)
@@ -187,8 +187,17 @@ func (s *Server) ssehandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	cc := r.Context().Done()
+	go func() {
+		<-cc
+		s.epool.Broadcast()
+	}()
+
 	for {
-		gen = s.epool.Next(last)
+		gen, ok = s.epool.Next(last, cc)
+		if !ok {
+			break
+		}
 
 		if sub(last, gen) > event.Len {
 			last, err = s.current(w)
@@ -199,5 +208,7 @@ func (s *Server) ssehandler(w http.ResponseWriter, r *http.Request) {
 		last = gen
 	}
 
-	log.Println("sse:", err)
+	if err != nil {
+		log.Println("sse:", err)
+	}
 }
