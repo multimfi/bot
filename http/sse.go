@@ -174,7 +174,11 @@ func (s *Server) ssehandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "text/event-stream")
+	hdr := w.Header()
+	hdr.Set("Content-Type", "text/event-stream")
+	hdr.Set("Cache-Control", "no-cache")
+	hdr.Set("Connection", "keep-alive")
+
 	var (
 		last, gen uint32
 		err       error
