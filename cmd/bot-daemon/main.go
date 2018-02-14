@@ -34,28 +34,36 @@ func fatal(fs ...errFunc) {
 	}
 }
 
-func config(file, tfile string) *http.Config {
+func botconfig(file string) (*http.Config, error) {
 	r := new(http.Config)
 
 	f, err := ioutil.ReadFile(file)
 	if os.IsNotExist(err) {
-		log.Printf("config error: %v", err)
-	} else if err != nil {
-		log.Fatalf("config error: %v", err)
-	} else {
-		if err := json.Unmarshal(f, r); err != nil {
-			log.Fatalf("config json error: %v", err)
-		}
-	}
-
-	f, err = ioutil.ReadFile(tfile)
-	if os.IsNotExist(err) {
-		log.Printf("config template error: %v", err)
-		return r
+		return r, nil
 	}
 	if err != nil {
-		log.Fatalf("config template error: %v", err)
+		return nil, err
 	}
+
+	err = json.Unmarshal(f, r)
+	return r, err
+}
+
+func config(file, tfile string) *http.Config {
+	r, err := botconfig(file)
+	if err != nil {
+		log.Fatalln("cfg:", err)
+	}
+
+	f, err := ioutil.ReadFile(tfile)
+	if os.IsNotExist(err) {
+		return r
+	}
+
+	if err != nil {
+		log.Fatalln("template:", err)
+	}
+
 	r.Template = string(f)
 	return r
 }
@@ -112,20 +120,16 @@ func main() {
 		hs.ListenAndServe,
 	)
 
-	ctx := context.Background()
 	sig := make(chan os.Signal)
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
 
-	select {
-	case s := <-sig:
-		log.Printf("received signal %s, shutting down", s)
+	log.Printf("received signal %s, shutting down", <-sig)
 
-		ic.Quit()
+	ic.Quit()
 
-		ctx, cfunc := context.WithTimeout(ctx, time.Second*5)
-		defer cfunc()
-		if err := hs.Shutdown(ctx); err != nil {
-			log.Fatal(err)
-		}
+	ctx, cfunc := context.WithTimeout(context.Background(), time.Second*5)
+	defer cfunc()
+	if err := hs.Shutdown(ctx); err != nil {
+		log.Fatal(err)
 	}
 }

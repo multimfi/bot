@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<title>bot</title>
+<script type="text/javascript">
+window.onload = function () {
+const EventIRCReady = 0
+const EventIRCDown = 1
+const EventReset = 2
+const EventAlert= 3
+const EventResponder = 4
+
+const StateActive =  0;
+const StateFailed =  1;
+const StateUnknown = 2;
+
+var interval = 0;
+var alerts = {};
+var responders = {};
+
+var state = document.getElementById("state").tBodies[0];
+var states = ["firing", "resolved"];
+var labels = {
+	"labels": function(obj, item) {
+		for (x in obj["labels"]) {
+			item.appendChild(kv(x, obj["labels"][x]));
+		}
+	},
+
+	"annotations": function(obj, item) {
+		for (x in obj["annotations"]) {
+			item.appendChild(kv(x, obj["annotations"][x]));
+		}
+	},
+
+	"startsAt": function(obj, item) {
+		if (obj.status != "firing") {
+			delete(alerts[obj.h].updater)
+			return;
+		}
+		alerts[obj.h].updater = function(t) {
+			var d = new Date(obj["startsAt"]);
+			item.innerHTML = obj["startsAt"]
+			item.innerHTML += "<br><b>" + since(t, d) + "</b>";
+		}
+		alerts[obj.h].updater(Date.now())
+	},
+
+	"endsAt": function(obj, item) {
+		var d1 = new Date(obj["endsAt"])
+		var d2 = new Date(obj["startsAt"])
+		if (d1 < 1) {
+			item.innerHTML = "tbd";
+			return
+		}
+		item.innerHTML = obj["endsAt"]
+		item.innerHTML += "<br><b>"+since(d1, d2)+"</b>";
+	},
+
+	"responders": function(obj, item) {
+		if (obj.status != "firing") {
+			return;
+		}
+
+		var r = obj["responders"];
+		if (!r) {
+			item.innerHTML = "none";
+			return;
+		}
+		item.innerHTML = "<b>" + r[obj.c] + "</b>";
+		item.innerHTML += "<br>" + r;
+	}
+}
+
+function updater() {
+	var now = Date.now();
+	for (i in alerts) {
+		if (typeof alerts[i].updater != "undefined") {
+			alerts[i].updater(now);
+		}
+	}
+}
+
+function since(x, y) {
+       var t = (x - y)/1e3;
+       var s = t%60|0;
+       t /= 60;
+       var m = t%60|0;
+       t /= 60;
+       var h = t%24|0;
+       t /= 24;
+       var d = t|0;
+       return (d == 0 ? "" : d+"d ") +
+               (h+d == 0 ? "" : h+"h ") +
+               (m+h+d == 0 ? "" : m+"m ") +
+               s+"s";
+}
+
+function kv(k, v) {
+	var ret = document.createElement("p");
+	var b = document.createElement("b");
+	b.innerHTML = k;
+	ret.appendChild(b);
+	ret.innerHTML += " " + v;
+	return ret;
+}
+
+function setState(item, state) {
+	for (x in states) {
+		if (state != states[x]) {
+			item.classList.remove(states[x]);
+			continue;
+		}
+		item.classList.add(state);
+	}
+}
+
+function getChild(name, obj) {
+	for (x in obj.children) {
+		y = obj.children[x]
+		if (y.name != name)
+			continue
+		return y
+	}
+}
+
+function updateState(obj) {
+	var alertItem;
+	if (!alerts[obj.h]) {
+		alertItem = document.createElement("tr");
+		alertItem.classList.add("alert")
+		alerts[obj.h] = alertItem;
+		state.appendChild(alertItem);
+	} else {
+		alertItem = alerts[obj.h];
+	}
+
+	setState(alertItem, obj.status);
+	for (name in labels) {
+		var item = getChild(name, alertItem);
+		if (!item) {
+			item = document.createElement("td");
+			alertItem.appendChild(item)
+			item.name = name;
+			labels[name](obj, item)
+		}
+		switch(name) {
+		case "endsAt":
+		case "startsAt":
+		case "responders":
+			labels[name](obj, item);
+		}
+	}
+}
+
+function updateIRC(n) {
+	var e = document.getElementById("irc")
+	switch(n) {
+	case EventIRCReady:
+		e.style.color = "green";
+		e.innerHTML = "OK!";
+		break;
+	case EventIRCDown:
+		e.style.color = "red";
+		e.innerHTML = "FAIL!";
+		break;
+	}
+}
+
+colormap = {
+	0: "green",
+	1: "red",
+	2: "black",
+}
+
+function updateResponders(obj) {
+	var e = document.getElementById("responders")
+	for (n in obj) {
+		var item = getChild(n, e);
+		if (!item) {
+			item = document.createElement("span");
+			e.appendChild(item)
+			item.name = n;
+			item.innerHTML = n;
+		}
+		item.style.color = colormap[obj[n]];
+	}
+}
+
+var conn = new EventSource("sse");
+
+conn.onerror = function (evt) {
+	var item = document.getElementById("err");
+	item.style.color = "red";
+	item.innerHTML = "connection error";
+}
+
+conn.onopen = function(evt) {
+	var item = document.getElementById("err");
+	item.style.color = "green";
+	item.innerHTML = "ok";
+}
+
+conn.addEventListener(EventAlert, function(e) {
+	var x = JSON.parse(e.data);
+	updateState(x);
+
+	if (document.getElementsByClassName("firing").length < 1) {
+		clearInterval(interval);
+		interval = 0;
+		return;
+	}
+
+	if (interval > 0) {
+		return;
+	}
+
+	interval = setInterval(updater, 1000);
+})
+
+conn.addEventListener(EventIRCReady, function(e) {
+	updateIRC(EventIRCReady);
+})
+
+conn.addEventListener(EventIRCDown, function(e) {
+	updateIRC(EventIRCDown);
+})
+
+conn.addEventListener(EventResponder, function(e) {
+	var x = JSON.parse(e.data);
+	updateResponders(x);
+})
+
+conn.addEventListener(EventReset, function(e) {
+	alerts = {};
+	for (x = state.rows.length-1; x > 0; x--) {
+		state.deleteRow(x);
+	}
+})
+};
+</script>
+<style type="text/css">
+body {
+	font-family: sans-serif;
+}
+
+td p {
+	margin: 0;
+	padding: 0;
+}
+
+table tr th {
+	text-align: left;
+}
+
+table {
+	width: 100%;
+	border-spacing: 0;
+}
+
+table tr td, table tr th, h1 {
+	padding-left: 1em;
+}
+
+.firing {
+	background: rgb(255, 156, 156);
+}
+
+.resolved {
+	background: rgb(232, 255, 240);
+}
+
+td {
+	padding: 1em;
+	border-top: 5px solid #fff;
+}
+
+#responders span {
+	font-weight: bold;
+	padding: 1em;
+}
+</style>
+</head>
+<body>
+<div id="err"></div>
+<p>IRC <b><span id="irc">TBD</span></b></p>
+<h4>Responders</h4>
+<div id="responders"></div>
+<h3>Alerts</h3>
+<div>
+<table id="state">
+  <tr>
+    <th>Labels</th>
+    <th>Annotations</th>
+    <th>Start</th>
+    <th>End</th>
+    <th>Responder</th>
+  </tr>
+</table>
+</div>
+</body>
+</html>

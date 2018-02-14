@@ -3,9 +3,5 @@
 		"group1": ["test1", "test2", "test3"],
 		"group2": ["test1", "test4"],
 		"group3": ["test5", "test3"]
-	},
-	"telegram": {
-		"botid": "botid-xxx",
-		"chatid": "chatid-xxx"
 	}
 }

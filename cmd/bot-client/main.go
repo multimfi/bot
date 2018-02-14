@@ -1,97 +1,48 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io/ioutil"
 	"log"
-	"net"
+	stdhttp "net/http"
 	"os"
 	"runtime"
 	"strings"
 	"text/template"
-	"time"
 
 	"github.com/multimfi/bot/alert"
 	"github.com/multimfi/bot/http"
-
-	"github.com/godbus/dbus"
-	"github.com/gorilla/websocket"
 )
 
 var buildversion = "devel"
 
-type client struct {
-	dbus     *dbus.Conn
-	ws       *websocket.Conn
-	template *template.Template
-}
-
-func (c *client) notify(title string, message string, urgency byte, timeout int32) {
-	obj := c.dbus.Object("org.freedesktop.Notifications", "/org/freedesktop/Notifications")
-	call := obj.Call(
-		"org.freedesktop.Notifications.Notify",
-		0,
-		"",
-		uint32(0),
-		"",
-		title,
-		message,
-		[]string{},
-		map[string]dbus.Variant{"urgency": dbus.MakeVariant(urgency)},
-		timeout,
-	)
-
-	if call.Err != nil {
-		log.Fatal(call.Err)
-	}
-}
-
-func (c *client) handleAlert(d []byte) error {
+func handleAlert(d []byte) error {
 	a := new(alert.Alert)
 	if err := json.Unmarshal(d, a); err != nil {
 		return err
 	}
 
 	buf := new(bytes.Buffer)
-	var msg string
-
-	err := c.template.Execute(buf, http.NewTData(a, nil))
-	if err != nil {
-		msg = "error: " + err.Error()
-	} else {
-		msg = buf.String()
+	if err := tmpl.Execute(buf, http.NewTData(a, nil)); err != nil {
+		return err
 	}
 
 	switch a.Status {
 	case alert.AlertFiring:
-		c.notify(a.Status, msg, 2, 0)
+		fmt.Println(a.Status, buf)
+
 	case alert.AlertResolved:
-		c.notify(a.Status, msg, 0, 15000)
+		fmt.Println(a.Status, buf)
+
+	default:
+		return fmt.Errorf("invalid status %s", a.Status)
 	}
 
 	return nil
-}
-
-func (c *client) msgHandler(d []byte) error {
-	var t http.WSTyped
-	if err := json.Unmarshal(d, &t); err != nil {
-		return err
-	}
-
-	var err error
-
-	switch t.Type {
-	case http.EventAlert:
-		err = c.handleAlert(t.Msg)
-	case http.EventIRC:
-	case http.EventResponder:
-		// TODO
-	}
-
-	return err
 }
 
 func loadTemplate(file string) *template.Template {
@@ -117,34 +68,17 @@ func loadTemplate(file string) *template.Template {
 	return ret
 }
 
-func newClient(addr, tmpl string) (*client, error) {
-	dc, err := dbus.SessionBus()
-	if err != nil {
-		return nil, err
-	}
-
-	d := &websocket.Dialer{}
-	wc, _, err := d.Dial(addr, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	return &client{
-		dbus:     dc,
-		ws:       wc,
-		template: loadTemplate(tmpl),
-	}, nil
-}
-
 func version() string {
 	return fmt.Sprintf("build: %s, runtime: %s", buildversion, runtime.Version())
 }
 
 var (
-	flagAddress  = flag.String("ws.addr", "ws://127.0.0.1:9500/ws", "websocket address")
+	flagAddress  = flag.String("sse.addr", "http://127.0.0.1:9500/sse", "sse endpoint")
 	flagVersion  = flag.Bool("version", false, "print version")
 	flagTemplate = flag.String("template", "template.tmpl", "template file")
 )
+
+var tmpl *template.Template
 
 func main() {
 	log.SetFlags(log.Lshortfile)
@@ -155,36 +89,40 @@ func main() {
 		os.Exit(0)
 	}
 
-	c, err := newClient(*flagAddress, *flagTemplate)
+	tmpl = loadTemplate(*flagTemplate)
+
+	r, err := stdhttp.Get(*flagAddress)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	if err := c.ws.WriteMessage(websocket.TextMessage, []byte{http.EventAlert}); err != nil {
-		log.Fatal(err)
+	s := bufio.NewScanner(r.Body)
+	s.Split(splitFunc)
+
+	for s.Scan() {
+		e, err := parseSSE(s.Bytes())
+		if err != nil {
+			log.Println(err)
+			continue
+		}
+
+		switch e.event {
+		case http.EventAlert:
+			err = handleAlert(e.data)
+		case http.EventIRCDown:
+			log.Println("irc down")
+		case http.EventIRCReady:
+			log.Println("irc ready")
+		case http.EventResponder:
+			log.Println("responder event")
+		}
+
+		if err != nil {
+			log.Fatal(err)
+		}
 	}
 
-	c.ws.SetPingHandler(func(m string) error {
-		err := c.ws.SetReadDeadline(time.Now().Add(http.PongWait))
-		if err != nil {
-			return err
-		}
-		err = c.ws.WriteControl(websocket.PongMessage, []byte(m), time.Now().Add(http.WriteWait))
-		if err == websocket.ErrCloseSent {
-			return nil
-		} else if e, ok := err.(net.Error); ok && e.Temporary() {
-			return nil
-		}
-		return err
-	})
-
-	for {
-		_, p, err := c.ws.ReadMessage()
-		if err != nil {
-			log.Fatal(err)
-		}
-		if err := c.msgHandler(p); err != nil {
-			log.Fatal(err)
-		}
+	if err := s.Err(); err != nil {
+		log.Fatal(err)
 	}
 }

@@ -14,8 +14,10 @@ import (
 	"time"
 
 	"github.com/multimfi/bot/alert"
+	"github.com/multimfi/bot/event"
 	"github.com/multimfi/bot/irc"
 	"github.com/multimfi/bot/responder"
+	"github.com/multimfi/bot/static"
 )
 
 // ReceiverGroup is a mapped group of receivers, nil is considered an empty group.
@@ -26,9 +28,8 @@ type Server struct {
 	irc   irc.Client
 	pool  *alert.Pool
 	rpool *responder.Pool
-	spool *subpool
+	epool *event.Pool
 	rg    ReceiverGroup
-	tg    *telegram
 	tmpl  *template.Template
 }
 
@@ -59,7 +60,7 @@ func NewServer(irc irc.Client, srv *http.ServeMux, cfg *Config) *Server {
 		irc:   irc,
 		pool:  alert.NewPool(),
 		rpool: responder.NewPool(),
-		spool: newPool(),
+		epool: event.NewPool(),
 	}
 
 	var err error
@@ -70,9 +71,6 @@ func NewServer(irc irc.Client, srv *http.ServeMux, cfg *Config) *Server {
 			t = cfg.Template
 		}
 
-		if cfg.Telegram.BotID != "" && cfg.Telegram.ChatID != "" {
-			r.tg = newTelegram(cfg.Telegram.BotID, cfg.Telegram.ChatID)
-		}
 		r.rg = cfg.Receivers
 	}
 
@@ -84,7 +82,10 @@ func NewServer(irc irc.Client, srv *http.ServeMux, cfg *Config) *Server {
 	}
 
 	srv.HandleFunc("/alertmanager", r.alertManagerHandler)
-	srv.HandleFunc("/ws", r.wsHandler)
+	srv.HandleFunc("/sse", r.ssehandler)
+	srv.HandleFunc("/dump", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		r.epool.String(w)
+	}))
 	srv.HandleFunc("/", r.statusPageHandler)
 
 	irc.Handle("!clear", r.clear)
@@ -134,8 +135,8 @@ func (s *Server) alert(a *alert.Alert) {
 		n.Ping(s.broadcastResponders)
 	}
 
-	// websocketpool broadcast
-	s.spool.broadcastAlert(ca)
+	// sse broadcast
+	s.broadcastAlert(ca)
 
 	buf := new(bytes.Buffer)
 	var msg string
@@ -146,8 +147,6 @@ func (s *Server) alert(a *alert.Alert) {
 	} else {
 		msg = buf.String()
 	}
-
-	s.tg.broadcastTelegram(msg)
 
 	if !s.irc.IsReady() {
 		return
@@ -161,7 +160,7 @@ func (s *Server) resolve(a *alert.Alert) {
 	if !s.pool.Remove(a) {
 		return
 	}
-	s.spool.broadcastAlert(a)
+	s.broadcastAlert(a)
 
 	n, _, err := s.rpool.Get(a.Responders)
 	if err != nil {
@@ -177,8 +176,6 @@ func (s *Server) resolve(a *alert.Alert) {
 	} else {
 		msg = buf.String()
 	}
-
-	s.tg.broadcastTelegram(msg)
 
 	if !s.irc.IsReady() {
 		return
@@ -248,7 +245,7 @@ func (s *Server) statusPageHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write(indexHTML)
+	w.Write(static.File("index.html"))
 }
 
 func (s *Server) statusFunc() string {
@@ -260,10 +257,22 @@ func (s *Server) statusFunc() string {
 	return ""
 }
 
+func comp(e1, e2 error) bool {
+	if e1 == e2 {
+		return true
+	}
+	if e1 == nil || e2 == nil {
+		return false
+	}
+	return e1.Error() == e2.Error()
+}
+
 // Dial connects server to irc, reconnects on failure.
 func (s *Server) Dial() error {
-	var d = time.Second
-
+	var (
+		d    = time.Second
+		lerr error
+	)
 	for {
 		err := s.irc.Dial()
 		if err == irc.ErrDone {
@@ -284,7 +293,11 @@ func (s *Server) Dial() error {
 			s.broadcastIRC()
 		}
 
-		log.Printf("irc: error %q, reconnecting in %s", err, d)
+		if !comp(err, lerr) {
+			log.Println("irc: error:", err)
+		}
+
+		lerr = err
 		time.Sleep(d)
 	}
 }
