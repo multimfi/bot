@@ -205,7 +205,10 @@ func (s *Server) ssehandler(w http.ResponseWriter, r *http.Request) {
 
 		if sub(last, gen) > event.Len {
 			last, err = s.current(w)
-			break
+			if err != nil {
+				break
+			}
+			continue
 		}
 
 		s.sserange(w, last, gen)
